@@ -1,0 +1,16 @@
+# Build output
+bin/
+obj/
+
+# Local runtime / secrets
+debug.log
+**/debug.log
+settings.json
+appsettings.local.json
+
+# IDE / OS
+.vs/
+*.user
+.idea/
+Thumbs.db
+.DS_Store

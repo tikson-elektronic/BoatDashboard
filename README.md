@@ -1,0 +1,208 @@
+# ⚓ Boat System Dashboard
+
+A modern Windows (WPF / .NET 9) dashboard that **monitors and controls a yacht's
+systems** — lighting, tank levels, batteries, and AC/shore power — by speaking
+directly to the boat's **Global Caché iTach IP2SL** serial-to-IP gateway over TCP.
+
+It also includes:
+
+- 🤖 a built-in **Claude AI assistant** with full tool access to read every sensor and operate every light,
+- 📡 **MQTT publishing** of all telemetry (for Home Assistant, Node-RED, Grafana, etc.),
+- ⚙ a **settings page** for the Claude API key and MQTT broker.
+
+> **Status:** working. All eight cabin/area lights, scene commands, tanks,
+> batteries, and AC monitor are live. See [Light commands](#light-commands).
+
+---
+
+## Screenshot / layout
+
+```
+┌──────────────────────────────────────────── ⚓ BOAT SYSTEM ───────────────────────────┐
+│  ● Connected   │ ● MQTT live                                                      ⚙   │
+│                                                                                        │
+│  AC MONITOR                                   │  BATTERIES                             │
+│  ┌────────┐ ┌────────┐ ┌──────────┐           │  Genset        13.0 V                  │
+│  │Shore 1 │ │Shore 2 │ │Generator │           │  Port engine   13.2 V                  │
+│  │ 223 V  │ │ 232 V  │ │  0 V OFF │           │  Stbd engine   13.1 V                  │
+│  └────────┘ └────────┘ └──────────┘           │  Service        0.0 V                  │
+│                                                │                                        │
+│  TANKS                                         │  LIGHTING                              │
+│  ┌──────────────┐ ┌──────────────┐            │  [ ALL ON ]  [ ALL OFF ]               │
+│  │Fresh wtr port│ │Fresh wtr stbd│            │  ● Interior Courtesy        ON         │
+│  │ 100% ███████ │ │  38% ███      │            │  ● Salon                    OFF        │
+│  └──────────────┘ └──────────────┘            │  …                                     │
+│  …fuel ×4…                                     │                                        │
+│                                                │  AI ASSISTANT  (Claude)                │
+│                                                │  ┌──────────────────────────────────┐ │
+│                                                │  │ you: turn off all lights         │ │
+│                                                │  │ claude: Done — all lights off.   │ │
+│                                                │  └──────────────────────────────────┘ │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Hardware
+
+| Component | Detail |
+|---|---|
+| **Gateway** | Global Caché **iTach IP2SL** (IP ⇄ RS-232), firmware `710-1009-05` |
+| Gateway IP | `192.168.0.100` |
+| Web config | port `80` |
+| iTach control API | port `4998` |
+| **Serial passthrough** | port **`4999`** ← the dashboard uses this |
+| Serial line | **57600 baud, no flow control, odd parity** (8-O-1) |
+| Controller | Multi-channel digital-switching/monitoring unit on the RS-232 bus |
+| iPad app | reference controller at `192.168.0.102` |
+
+The IP2SL transparently bridges TCP `4999` ⇄ the RS-232 line. Anything written to
+the socket is sent to the controller; the controller continuously streams telemetry
+back to **any** connected client.
+
+> ⚠️ The iTach command API on port `4998` answered **unauthenticated** and reported
+> `NET … UNLOCKED`. Anyone on the LAN can reconfigure it — consider locking it and/or
+> isolating it on its own VLAN.
+
+---
+
+## Protocol
+
+See [`docs/PROTOCOL.md`](docs/PROTOCOL.md) for the full reverse-engineering write-up.
+Summary below.
+
+### Light commands
+
+Commands are **4-byte little-endian** values written to `192.168.0.100:4999`
+(sent 3× ~250 ms apart, like the reference app). Individual lights are **toggles**;
+the scene commands are absolute.
+
+| Control | Value | Bytes on wire |
+|---|---|---|
+| **All On** | `0x0600` | `00 06 00 00` |
+| **All Off** | `0x0700` | `00 07 00 00` |
+| Interior Courtesy | `0x0009` | `09 00 00 00` |
+| Port Fwd Cabin | `0x0100` | `00 01 00 00` |
+| Port Fwd Gangway | `0x0200` | `00 02 00 00` |
+| Port Mid Cabin | `0x0300` | `00 03 00 00` |
+| Galley | `0x0500` | `00 05 00 00` |
+| Salon | `0x0800` | `00 08 00 00` |
+| Stbd Fwd Cabin | `0x0900` | `00 09 00 00` |
+| Stbd Aft Cabin | `0x0D00` | `00 0D 00 00` |
+| Heartbeat (keepalive) | `0x00FF` | `FF 00 00 00` (every ~6 s) |
+
+> The byte order matters: for every light except Interior Courtesy the significant
+> byte is the **second** byte. Encoding the value as a naive `uint16` in the first
+> byte sends the wrong command and the light silently ignores it.
+
+### Telemetry
+
+The controller streams ASCII frames on the same port:
+
+```
+<00:0000,0000,0082,0201,0084,0200,0083,0200,0000,0000,0064,0026,0400,FFDF,F000,77E5>
+ └ch  └────────────────── 16 comma-separated hex fields ──────────────────┘
+```
+
+Channels `00`–`03` carry real data; `FE`/`FF` are framing artifacts. Trailing
+fields 12–15 are status/framing constants.
+
+| Reading | Channel · field | Conversion |
+|---|---|---|
+| Fresh water — port | `00` f10 | value = % |
+| Fresh water — stbd | `00` f11 | value = % |
+| Fuel — fwd port | `03` f2 | value = % |
+| Fuel — fwd stbd | `03` f3 | value = % |
+| Fuel — aft port | `03` f10 | value = % |
+| Fuel — aft stbd | `03` f11 | value = % |
+| Battery — Genset | `00` f2 | value ÷ 10 = V |
+| Battery — Port engine | `00` f4 | value ÷ 10 = V |
+| Battery — Stbd engine | `00` f6 | value ÷ 10 = V |
+| Battery — Service | `00` f8 | value ÷ 10 = V |
+| Shore 1 — V / A / Hz | `02` f0 / f1 / f2 | f2 ÷ 10 = Hz |
+| Shore 2 — V / A / Hz | `02` f3 / f4 / f5 | f5 ÷ 10 = Hz |
+| Generator — V / A / Hz | `02` f6 / f7 / f8 | f8 ÷ 10 = Hz |
+
+---
+
+## Build & run
+
+Requires the **.NET 9 SDK** on Windows.
+
+```bash
+cd BoatDashboard
+dotnet run
+```
+
+Or build a release executable:
+
+```bash
+dotnet publish -c Release -r win-x64 --self-contained false
+```
+
+On launch the app connects to `192.168.0.100:4999` and auto-reconnects if the link
+drops. The connection/MQTT status pills are in the top-right; click **⚙** for settings.
+
+---
+
+## Settings
+
+Open with the **⚙** button. Stored at `%AppData%\BoatDashboard\settings.json`
+(this file is **not** committed and may contain secrets).
+
+- **Claude API key** — enables the AI assistant.
+- **MQTT** — enable + broker host/port/username/password/base topic.
+
+---
+
+## AI assistant
+
+Powered by the official **Anthropic C# SDK** on `claude-opus-4-8`, using a manual
+tool-use loop. Two tools give it full access to the boat:
+
+- `get_status` → returns all tanks, batteries, and AC readings as JSON.
+- `control_lights` → operates any light (all on/off + the eight individual lights).
+
+Ask things like *"turn off all lights"*, *"what's my fuel?"*, *"any low batteries?"*,
+*"switch on the galley light"*.
+
+---
+
+## MQTT
+
+When enabled, all telemetry is published every 5 s as **retained** messages under
+the configured base topic (default `boat`):
+
+```
+boat/tanks/fresh_water_port           100
+boat/tanks/fuel_fwd_stbd              25
+boat/batteries/genset                 13.0
+boat/ac/shore_1/volts                 223
+boat/ac/shore_1/amps                  10
+boat/ac/shore_1/hz                    50.0
+boat/status                           {"tanks":[…],"batteries":[…],"ac":[…]}
+```
+
+---
+
+## Project structure
+
+| File | Role |
+|---|---|
+| `Ip2slClient.cs` | TCP client: telemetry read loop, frame parser, command send (serialized writes), heartbeat, auto-reconnect |
+| `ViewModels.cs` | MVVM view models (tanks, batteries, AC, lights, chat) + status/MQTT projections |
+| `MainWindow.xaml(.cs)` | Dashboard UI + wiring (timer, clicks, settings, chat) |
+| `Theme.xaml` | Dark theme: palette, card/button styles |
+| `SettingsWindow.xaml(.cs)` | Claude key + MQTT configuration |
+| `ClaudeAssistant.cs` | Anthropic SDK tool-use loop (`get_status`, `control_lights`) |
+| `MqttPublisher.cs` | MQTTnet publisher |
+| `Settings.cs` | Settings model + JSON persistence |
+
+---
+
+## Disclaimer
+
+This software talks directly to a vessel's electrical/lighting control bus. It was
+built by reverse-engineering one specific installation. **Use at your own risk.**
+Verify behavior before relying on it, and never use it for anything safety-critical
+(navigation lights, bilge, etc.).
