@@ -18,11 +18,13 @@ public sealed class ClaudeAssistant
     private readonly List<MessageParam> _history = new();
 
     private const string SystemPrompt =
-        "You are the onboard AI assistant for a boat. You have live access to all systems via tools: " +
+        "You are the onboard AI assistant for a Lagoon 630 motor yacht. You have live access via tools: " +
         "get_status returns tank levels, battery voltages, and AC (shore/generator) readings; " +
+        "get_pc_status returns the onboard PC's CPU load/temperature, LAN dashboard URL, and hardware-link state; " +
         "control_lights switches lights. Use get_status before answering questions about current state. " +
         "When the user asks to turn lights on/off, call control_lights. Be concise and direct — answer in a " +
-        "sentence or two, no preamble. Use plain text, no markdown headers. Flag anything that looks unsafe " +
+        "sentence or two, no preamble. Use plain text, no markdown headers. Replies may be read aloud by " +
+        "text-to-speech, so keep them natural to hear. Flag anything that looks unsafe " +
         "(e.g. a battery reading 0 V, or a tank nearly empty).";
 
     private static readonly List<ToolUnion> Tools =
@@ -32,6 +34,17 @@ public sealed class ClaudeAssistant
             Name = "get_status",
             Description = "Get current live readings for all boat systems: tank levels (%), " +
                           "battery voltages (V), and AC monitor (Shore 1, Shore 2, Generator: volts, amps, Hz).",
+            InputSchema = new()
+            {
+                Properties = new Dictionary<string, JsonElement>(),
+                Required = [],
+            },
+        },
+        new Tool
+        {
+            Name = "get_pc_status",
+            Description = "Get the onboard PC's health: CPU load %, CPU temperature (if available), " +
+                          "LAN IP / dashboard URL, and hardware-link state (iTach connected or not).",
             InputSchema = new()
             {
                 Properties = new Dictionary<string, JsonElement>(),
@@ -117,6 +130,15 @@ public sealed class ClaudeAssistant
         {
             case "get_status":
                 return _vm.StatusJson();
+
+            case "get_pc_status":
+                return JsonSerializer.Serialize(new
+                {
+                    cpu_load_percent = Math.Round(PcStats.CpuLoadPercent()),
+                    cpu_temp_c = PcStats.CpuTempC(),
+                    lan_dashboard_url = $"http://{LocalServer.LocalIPv4()}:8080",
+                    itach_connected = _client.Connected,
+                });
 
             case "control_lights":
                 string action = "";

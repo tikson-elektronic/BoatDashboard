@@ -60,12 +60,16 @@ $dec   = $dec.Substring(0, $dec.IndexOf('</body></html>') + '</body></html>'.Len
 [IO.File]::WriteAllText("WebUI\app.html", $dec, (New-Object System.Text.UTF8Encoding($false)))
 ```
 
-After extracting, re-apply the two local edits:
+After extracting, re-apply the small set of local edits (the design otherwise stands alone):
 
 1. Point the topbar logo at the local asset:
    `<img src="uploads/lagoon-logo.png" … onerror="this.style.display='none'">`.
-2. Re-apply the `LIVE` object + the HOME data-line bindings (§3), the **ENGINES** and
-   **AV / MEDIA** screens (§5), and confirm the steady-lamp fix (§6).
+2. Re-apply the `LIVE` object + the HOME data-line bindings (§3).
+3. Re-apply the steady-lamp fix (§6).
+
+> The delivered design now includes its **own** Engines and AV screens — do **not** re-add
+> the earlier hand-built versions. Earlier iterations didn't have them, so they were added
+> locally; that is no longer needed.
 
 Verify a render without launching the app:
 
@@ -157,6 +161,30 @@ banner, "Not Under Command" nav warning), which should blink. After any design r
 `grep pulseDot WebUI/app.html` — only alarms should keep it.
 
 ---
+
+## 6b. LAN access, discovery & remote control
+
+`LocalServer.cs` (dependency-free `TcpListener`, port **8080**, no admin needed) serves the
+UI to any device on the boat's Wi-Fi and exposes `GET /api/telemetry` + `POST /api/cmd`.
+When serving `app.html` it injects a *remote bridge* (fakes the WebView2 channel over HTTP,
+polls telemetry every 2 s) plus favicon/apple-touch-icon links — so an iPad gets live data
+and control from plain Safari. Asset paths are URL-decoded (`%20` → space) because the
+image filenames contain spaces. mDNS advertises `BoatDashboard._http._tcp` (Makaretu.Dns).
+The LAN URL is shown in Settings → NETWORK.
+
+**VNC**: TightVNC server runs as a Windows service on port **5900** (password `5577`,
+firewall rule "TightVNC Server (TCP 5900)") for full remote desktop of the kiosk PC.
+
+## 6c. Claude assistant + offline voice
+
+The **ASSISTANT** screen (chat + mic) talks to `ClaudeAssistant.cs` — a tool-use loop on
+`claude-opus-4-8` with live tools: `get_status` (tanks/batteries/AC), `get_pc_status`
+(CPU load/temp, LAN URL, iTach link), `control_lights` (all 10 light commands). The page
+posts `{cmd:'claude',text}` → `ShellWindow.AskClaudeAsync` → reply lands via
+`window.claudeReply`. Voice is **fully offline** (`VoiceService.cs`, System.Speech):
+mic button → one dictated utterance → auto-sends to Claude → the reply is spoken by
+Windows TTS. Requires the API key in Settings → CLAUDE AI (assistant shows "no API key"
+until set); mic errors surface in-chat.
 
 ## 7. Kiosk mode
 

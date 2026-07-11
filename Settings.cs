@@ -23,6 +23,9 @@ public sealed class AppSettings
 
     /// <summary>Register the app to start automatically at Windows sign-in.</summary>
     public bool LaunchAtBoot { get; set; } = false;
+
+    /// <summary>Whether alarm indicators pulse/blink. When false they show steady.</summary>
+    public bool BlinkAlarms { get; set; } = true;
 }
 
 public static class SettingsStore

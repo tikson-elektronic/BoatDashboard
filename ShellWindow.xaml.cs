@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
+using Makaretu.Dns;
 using Microsoft.Web.WebView2.Core;
 
 namespace BoatDashboard;
@@ -19,6 +20,17 @@ public partial class ShellWindow : Window
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(1000) };
     private AppSettings _settings = SettingsStore.Load();
     private bool _kiosk;
+
+    public const int HttpPort = 8080;
+    private LocalServer? _server;
+    private MulticastService? _mdns;
+    private ServiceDiscovery? _sd;
+
+    // Claude assistant + offline voice. _vm mirrors live readings for the assistant's get_status tool.
+    private readonly DashboardViewModel _vm = new();
+    private ClaudeAssistant? _assistant;
+    private VoiceService? _voice;
+    private bool _replyAloud;   // speak the next reply (query came in by voice)
 
     // Injected before any page script. Defines window.vomsApply (live-data merge),
     // routes the lighting master switches to the real iTach, and adds a SETUP entry.
@@ -37,12 +49,12 @@ function __vpost(o){ try{ window.chrome.webview.postMessage(o); }catch(e){} }
 function __vsetup(){
   var rail=document.getElementById('rail');
   if(!rail || document.getElementById('vSetup')) return;
-  var b=document.createElement('div'); b.id='vSetup'; b.textContent='⚙ SETUP';
-  b.style.cssText='height:46px;display:flex;align-items:center;padding:0 16px;cursor:pointer;font-size:11px;font-weight:700;letter-spacing:2px;color:#4a5b66;';
-  b.onmouseenter=function(){b.style.color='#2fc4d1';};
-  b.onmouseleave=function(){b.style.color='#4a5b66';};
+  var b=document.createElement('div'); b.id='vSetup';
+  b.style.cssText='display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 4px;cursor:pointer;color:#4a5b66;font-size:9.5px;font-weight:700;letter-spacing:1.2px;';
+  b.innerHTML='<div style=""font-size:18px;line-height:1;"">⚙</div><div>SETUP</div>';
   b.onclick=function(){ __vpost({cmd:'settings'}); };
-  rail.appendChild(b);
+  var spacer=rail.querySelector('div[style*=""flex:1""]');   /* placed right under the SETTINGS nav item */
+  if(spacer) rail.insertBefore(b, spacer); else rail.appendChild(b);
 }
 window.addEventListener('DOMContentLoaded', function(){
   if(typeof window.setAllZones==='function'){
@@ -62,7 +74,14 @@ window.addEventListener('DOMContentLoaded', function(){
         InitializeComponent();
         Loaded += OnLoaded;
         StateChanged += OnStateChanged;
-        Closed += (_, _) => { _timer.Stop(); _client.Dispose(); };
+        Closed += (_, _) =>
+        {
+            _timer.Stop();
+            _client.Dispose();
+            try { _server?.Dispose(); } catch { }
+            try { _sd?.Dispose(); _mdns?.Dispose(); } catch { }
+            try { _voice?.Dispose(); } catch { }
+        };
     }
 
     private async void OnLoaded(object? sender, RoutedEventArgs e)
@@ -82,7 +101,7 @@ window.addEventListener('DOMContentLoaded', function(){
 
         await core.AddScriptToExecuteOnDocumentCreatedAsync(BridgeJs);
         core.WebMessageReceived += OnWebMessage;
-        core.NavigationCompleted += (_, _) => ApplyCursor();
+        core.NavigationCompleted += (_, _) => { ApplyCursor(); ApplyBlink(); PushAssistantState(); };
 
         // Serve the WebUI folder over a virtual host so relative asset paths resolve.
         var webDir = Path.Combine(AppContext.BaseDirectory, "WebUI");
@@ -95,6 +114,87 @@ window.addEventListener('DOMContentLoaded', function(){
         _client.Start();
         _timer.Tick += OnTick;
         _timer.Start();
+
+        StartLanServices(webDir);
+        ApplyAssistant();
+    }
+
+    /// <summary>(Re)creates the Claude assistant from the saved API key and the voice service.</summary>
+    private void ApplyAssistant()
+    {
+        _assistant = string.IsNullOrWhiteSpace(_settings.ClaudeApiKey)
+            ? null
+            : new ClaudeAssistant(_settings.ClaudeApiKey, _client, _vm);
+
+        if (_voice is null)
+        {
+            _voice = new VoiceService();
+            _voice.OnListeningChanged += l => Dispatcher.BeginInvoke(() =>
+                _ = Web.CoreWebView2?.ExecuteScriptAsync($"window.claudeState({{listening:{(l ? "true" : "false")}}})"));
+            _voice.OnHeard += text => Dispatcher.BeginInvoke(() =>
+            {
+                _replyAloud = true;
+                var heard = JsonSerializer.Serialize(text);
+                _ = Web.CoreWebView2?.ExecuteScriptAsync($"window.claudeState({{heard:{heard}}})");
+            });
+        }
+        PushAssistantState();
+    }
+
+    private void PushAssistantState() =>
+        _ = Web.CoreWebView2?.ExecuteScriptAsync(
+            $"window.claudeState({{ready:{(_assistant is null ? "false" : "true")}}})");
+
+    private async Task AskClaudeAsync(string text)
+    {
+        string reply;
+        if (_assistant is null)
+        {
+            reply = "No Claude API key configured. Open ⚙ SETUP and add your key under CLAUDE AI.";
+        }
+        else
+        {
+            try { reply = await _assistant.AskAsync(text); }
+            catch (Exception ex) { reply = "Error talking to Claude: " + ex.Message; }
+            if (string.IsNullOrWhiteSpace(reply)) reply = "(no response)";
+        }
+
+        if (_replyAloud) { _replyAloud = false; _voice?.Speak(reply); }
+        var json = JsonSerializer.Serialize(reply);
+        _ = Web.CoreWebView2?.ExecuteScriptAsync($"window.claudeReply({json})");
+    }
+
+    /// <summary>Serves the UI over HTTP on the LAN and advertises the PC via mDNS.</summary>
+    private void StartLanServices(string webDir)
+    {
+        try
+        {
+            _server = new LocalServer(webDir, HttpPort);
+            // Route remote-browser commands through the same handler as the WebView2 bridge.
+            _server.OnCommand = (cmd, code) => Dispatcher.BeginInvoke(() => RunCommand(cmd, code));
+            _server.Start();
+        }
+        catch (Exception ex) { Ip2slClient.Log("[lan] http server failed: " + ex.Message); }
+
+        try
+        {
+            _mdns = new MulticastService();
+            _sd = new ServiceDiscovery(_mdns);
+            _sd.Advertise(new ServiceProfile("BoatDashboard", "_http._tcp", HttpPort));
+            _mdns.Start();
+        }
+        catch (Exception ex) { Ip2slClient.Log("[lan] mdns failed: " + ex.Message); }
+    }
+
+    /// <summary>Executes a hardware command from either the WebView2 bridge or a LAN client.</summary>
+    private void RunCommand(string cmd, uint code)
+    {
+        switch (cmd)
+        {
+            case "all_on": _ = _client.SendCommandAsync(0x0600u); break;
+            case "all_off": _ = _client.SendCommandAsync(0x0700u); break;
+            case "light": if (code != 0) _ = _client.SendCommandAsync(code); break;
+        }
     }
 
     /// <summary>Applies (or removes) the fullscreen, cursor-less, locked kiosk chrome.</summary>
@@ -140,6 +240,19 @@ window.addEventListener('DOMContentLoaded', function(){
             "if(!s.parentNode)document.head.appendChild(s);})()");
     }
 
+    /// <summary>Steadies the pulsing alarm indicators when blink is disabled (redefines the
+    /// pulseDot keyframe to a no-op; the later definition wins).</summary>
+    private void ApplyBlink()
+    {
+        var core = Web.CoreWebView2;
+        if (core is null) return;
+        var css = _settings.BlinkAlarms ? "" : "@keyframes pulseDot{0%,100%{opacity:1}50%{opacity:1}}";
+        _ = core.ExecuteScriptAsync(
+            "(function(){var s=document.getElementById('__vblink')||document.createElement('style');" +
+            "s.id='__vblink';s.textContent=" + JsonSerializer.Serialize(css) + ";" +
+            "if(!s.parentNode)document.head.appendChild(s);})()");
+    }
+
     private void OnStateChanged(object? sender, EventArgs e)
     {
         // In kiosk mode never allow the window to be minimised away.
@@ -162,6 +275,8 @@ window.addEventListener('DOMContentLoaded', function(){
     {
         // With no hardware connected, leave the design's demo values in place.
         if (!_client.Connected) return;
+
+        _vm.Refresh(_client, "");   // keep the assistant's get_status snapshot current
 
         int F(string ch, int i) => _client.Field(ch, i) ?? 0;
         double V(string ch, int i) => F(ch, i) / 10.0;
@@ -194,29 +309,44 @@ window.addEventListener('DOMContentLoaded', function(){
         };
 
         var json = JsonSerializer.Serialize(live);
+        if (_server is not null) _server.TelemetryJson = json;   // share with LAN clients
         _ = Web.CoreWebView2.ExecuteScriptAsync($"window.vomsApply({json})");
     }
 
     private void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
-        string cmd;
+        string cmd, text = "";
+        uint code = 0;
         try
         {
             using var doc = JsonDocument.Parse(e.WebMessageAsJson);
-            cmd = doc.RootElement.TryGetProperty("cmd", out var c) ? c.GetString() ?? "" : "";
+            var root = doc.RootElement;
+            cmd = root.TryGetProperty("cmd", out var c) ? c.GetString() ?? "" : "";
+            if (root.TryGetProperty("code", out var cd) && cd.TryGetInt64(out var n))
+                code = (uint)n;
+            if (root.TryGetProperty("text", out var t))
+                text = t.GetString() ?? "";
         }
         catch { return; }
 
         switch (cmd)
         {
-            case "all_on":
-                _ = _client.SendCommandAsync(0x0600u);
-                break;
-            case "all_off":
-                _ = _client.SendCommandAsync(0x0700u);
-                break;
             case "settings":
                 OpenSettings();
+                break;
+            case "claude":
+                if (text.Length > 0) _ = AskClaudeAsync(text);
+                break;
+            case "voice_start":
+                if (_voice is not null && !_voice.TryStartListening(out var err))
+                    _ = Web.CoreWebView2?.ExecuteScriptAsync(
+                        $"window.claudeReply({JsonSerializer.Serialize("Microphone unavailable: " + err)})");
+                break;
+            case "voice_stop":
+                _voice?.StopListening();
+                break;
+            default:
+                RunCommand(cmd, code);
                 break;
         }
     }
@@ -228,6 +358,8 @@ window.addEventListener('DOMContentLoaded', function(){
         {
             _settings = dlg.Settings;
             ApplyKiosk();
+            ApplyBlink();
+            ApplyAssistant();
         }
     }
 }

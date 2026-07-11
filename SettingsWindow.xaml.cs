@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Threading;
 using Microsoft.Win32;
 
 namespace BoatDashboard;
@@ -10,6 +12,8 @@ public partial class SettingsWindow : Window
     public AppSettings Settings { get; private set; }
     public bool Saved { get; private set; }
 
+    private readonly DispatcherTimer _pcTimer = new() { Interval = TimeSpan.FromMilliseconds(1500) };
+
     public SettingsWindow(AppSettings settings)
     {
         InitializeComponent();
@@ -18,10 +22,46 @@ public partial class SettingsWindow : Window
         ApiKeyBox.Password = settings.ClaudeApiKey;
         KioskCheck.IsChecked = settings.Kiosk;
         BootCheck.IsChecked = settings.LaunchAtBoot;
+        BlinkCheck.IsChecked = settings.BlinkAlarms;
 
         HardwareIdText.Text = "Hardware ID: " + PairingService.HardwareId;
+        NetUrlText.Text = $"http://{LocalServer.LocalIPv4()}:{ShellWindow.HttpPort}";
+        NetDiscoveryText.Text = "Discovery (mDNS / Bonjour): BoatDashboard._http._tcp.local";
         RefreshPairingUi();
+        LoadLogs();
+
+        _pcTimer.Tick += (_, _) => UpdatePcStats();
+        _pcTimer.Start();
+        UpdatePcStats();
+
+        Closed += (_, _) => _pcTimer.Stop();
     }
+
+    private void UpdatePcStats()
+    {
+        CpuLoadText.Text = PcStats.CpuLoadPercent().ToString("0") + " %";
+        var t = PcStats.CpuTempC();
+        CpuTempText.Text = t is { } c ? c.ToString("0.0") + " °C" : "n/a";
+    }
+
+    private void LoadLogs()
+    {
+        try
+        {
+            var path = Path.Combine(AppContext.BaseDirectory, "debug.log");
+            if (!File.Exists(path)) { LogsBox.Text = "(no log yet)"; return; }
+            // Read the last ~200 lines, tolerating the file being open by the app.
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var sr = new StreamReader(fs);
+            var all = sr.ReadToEnd().Split('\n');
+            var tail = all.Length > 200 ? all[^200..] : all;
+            LogsBox.Text = string.Join("\n", tail);
+            LogsBox.ScrollToEnd();
+        }
+        catch (Exception ex) { LogsBox.Text = "Could not read log: " + ex.Message; }
+    }
+
+    private void RefreshLogs_Click(object sender, RoutedEventArgs e) => LoadLogs();
 
     private void RefreshPairingUi()
     {
@@ -94,6 +134,7 @@ public partial class SettingsWindow : Window
         Settings.ClaudeApiKey = ApiKeyBox.Password.Trim();
         Settings.Kiosk = KioskCheck.IsChecked == true;
         Settings.LaunchAtBoot = BootCheck.IsChecked == true;
+        Settings.BlinkAlarms = BlinkCheck.IsChecked == true;
 
         SetLaunchAtBoot(Settings.LaunchAtBoot);
         SettingsStore.Save(Settings);

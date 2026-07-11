@@ -82,8 +82,50 @@
                           Foreground="{StaticResource TextBrush}" FontSize="13" Margin="2,10,0,0"/>
                 <CheckBox x:Name="BootCheck" Content="Launch automatically at Windows startup"
                           Foreground="{StaticResource TextBrush}" FontSize="13" Margin="2,10,0,0"/>
+                <CheckBox x:Name="BlinkCheck" Content="Blink alarm indicators (uncheck for steady alarms)"
+                          Foreground="{StaticResource TextBrush}" FontSize="13" Margin="2,10,0,0"/>
                 <TextBlock Text="In kiosk mode the window has no chrome or cursor and stays on top. The only way to exit is the passcode below."
                            Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="2,8,0,0" TextWrapping="Wrap"/>
+
+                <TextBlock Text="ONBOARD PC" Style="{StaticResource SectionTitle}" Margin="0,20,0,2"/>
+                <Grid Margin="0,6,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="CPU LOAD" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="CpuLoadText" Text="—" Foreground="{StaticResource TextBrush}" FontSize="22" FontWeight="SemiBold" Margin="0,2,0,0"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1">
+                        <TextBlock Text="CPU TEMPERATURE" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="CpuTempText" Text="—" Foreground="{StaticResource TextBrush}" FontSize="22" FontWeight="SemiBold" Margin="0,2,0,0"/>
+                    </StackPanel>
+                </Grid>
+
+                <TextBlock Text="NETWORK (LAN ACCESS)" Style="{StaticResource SectionTitle}" Margin="0,20,0,2"/>
+                <TextBlock Text="Open the dashboard from any phone or tablet on the boat's Wi-Fi:"
+                           Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="2,6,0,0" TextWrapping="Wrap"/>
+                <TextBlock x:Name="NetUrlText" Text="—" Foreground="{StaticResource TextBrush}" FontSize="18"
+                           FontWeight="SemiBold" FontFamily="Consolas" Margin="2,4,0,0"/>
+                <TextBlock x:Name="NetDiscoveryText" Text="" Foreground="{StaticResource MutedBrush}"
+                           FontSize="11" Margin="2,4,0,0" TextWrapping="Wrap"/>
+
+                <Grid Margin="0,20,0,2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="LOGS" Style="{StaticResource SectionTitle}" Margin="0,0,0,0"/>
+                    <Button Grid.Column="1" Content="Refresh" Height="26" Padding="10,0" VerticalAlignment="Center"
+                            Style="{StaticResource LightButton}" Click="RefreshLogs_Click"/>
+                </Grid>
+                <Border BorderBrush="{StaticResource StrokeBrush}" BorderThickness="1" CornerRadius="4" Margin="0,4,0,0">
+                    <TextBox x:Name="LogsBox" IsReadOnly="True" FontFamily="Consolas" FontSize="11"
+                             Height="150" TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto"
+                             HorizontalScrollBarVisibility="Auto" Background="{StaticResource TrackBrush}"
+                             Foreground="{StaticResource MutedBrush}" BorderThickness="0"/>
+                </Border>
 
                 <TextBlock Text="SHUT DOWN" Style="{StaticResource SectionTitle}" Margin="0,20,0,2"/>
                 <TextBlock Text="Enter the passcode to close the dashboard."
