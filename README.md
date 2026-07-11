@@ -15,6 +15,31 @@ It also includes:
 
 ---
 
+## 🛥 New UI — "Lagoon 630 MY" Vessel Monitor
+
+The dashboard's interface has been reskinned to the **Lagoon 630 MY — Vessel Monitor**
+design. It is hosted inside the WPF app in a **WebView2** control (`ShellWindow`) and fed
+**live iTach telemetry**, so it matches the design exactly while showing real vessel data.
+
+- **13 screens** in a left nav rail: Home, **Engines**, AC Power, Batteries, Tanks,
+  Nav Lights, Lighting, Shades, **AV / Media**, Electronics, Automation, System, Settings.
+- **Live data**: AC volts/amps/Hz, tank levels, battery/service bank and alarm state are
+  read from the iTach and pushed into the page every second (demo values shown when no
+  hardware is connected).
+- **Engines** page: twin-diesel RPM, coolant, oil pressure, hours, fuel rate.
+- **AV / Media** page: Salon TV lift (up/stop/down), amplifier (power/volume/mute/source),
+  and a full TV remote.
+- **Kiosk mode** (Settings → *Kiosk / Display*): full-screen over the taskbar, hidden
+  cursor, always-on-top, optional launch-at-boot, and **locked** — the only way to exit is
+  *Shut Down* with passcode **5577**.
+
+`App.xaml` starts `ShellWindow`; the classic native dashboard (`MainWindow`, documented
+below) remains in the repo but is no longer the startup window.
+
+📖 **Full details:** [`docs/VESSEL_MONITOR_UI.md`](docs/VESSEL_MONITOR_UI.md)
+
+---
+
 ## Screenshot / layout
 
 ```

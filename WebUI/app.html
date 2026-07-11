@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lagoon 630 MY — Vessel Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<style>/* vietnamese */
+@font-face {
+  font-family: 'Barlow';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("d96c57f1-9ae1-4ecf-93ba-403bed2403ef") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Barlow';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("9cb06bfd-ed1d-4d61-b37b-2752bc631b51") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Barlow';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("62d27a4f-fbc0-47e5-ad4b-a846e1d94922") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'Barlow';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("930b1cf0-1381-4372-aab5-bde78e5b2c3f") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Barlow';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("b22adcf8-c869-4a9d-a1d7-03da1fb34759") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Barlow';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("72c4f69e-44d0-457b-a4ee-1715ddce87a1") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'Barlow';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("5f9bb008-36e4-4914-8b65-0102e8b9055a") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Barlow';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("a7ad6d73-cb5f-43e6-a1a0-bd09a9786376") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Barlow';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("e6f7b04a-3833-4a89-bc7b-74d8fce5ddcf") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'Barlow';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("fe0e69bd-d326-4001-953a-44fee1964a73") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Barlow';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("9b4b13e1-7f8d-42c4-8852-a45f00fdf7ea") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Barlow';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("514fe04c-e24b-4c79-b7d1-1f08432416e4") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'Barlow Condensed';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("d03ded1d-d3b6-422d-b87b-b96ba0a8c49c") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Barlow Condensed';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("5b5a3b3b-6fe3-480f-9bc7-166d1d603bfd") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Barlow Condensed';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("d19d95fa-c77d-4741-81c4-ed2cd58ef5c1") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'Barlow Condensed';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("d7306a89-6b65-4255-b2ae-f3ee05c49626") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Barlow Condensed';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("72c57932-7c84-4e3f-90d7-c86fc83b9561") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Barlow Condensed';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("fabbff26-a093-4c25-a28d-c03aae75b0c2") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'Barlow Condensed';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("a5bf068c-937b-40c5-ac38-65f9da7b3249") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Barlow Condensed';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("1abd3929-151a-4598-9c32-540616888b86") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Barlow Condensed';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("eb7670f1-8294-49de-aa2f-637b15134564") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+</style>
+<style>
+  html,body{margin:0;padding:0;background:#0a1014;height:100%;}
+  *{box-sizing:border-box;}
+  a{color:#2fc4d1;text-decoration:none;} a:hover{color:#7de3ec;}
+  body{font-family:'Barlow',-apple-system,'Helvetica Neue',Segoe UI,Arial,sans-serif;color:#e8f0f2;}
+  @keyframes pulseDot{0%,100%{opacity:1;}50%{opacity:.35;}}
+  @keyframes flowDash{to{background-position:24px 0;}}
+  @keyframes needleWobble{0%,100%{transform:rotate(0deg);}25%{transform:rotate(-1.2deg);}60%{transform:rotate(1.4deg);}80%{transform:rotate(-0.6deg);}}
+  @keyframes gaugeSweep{0%{transform:rotate(-60deg);}55%{transform:rotate(6deg);}75%{transform:rotate(-3deg);}100%{transform:rotate(0deg);}}
+  @keyframes arcBreath{0%,100%{opacity:1;}50%{opacity:0.55;}}
+  @keyframes sheenSpin{to{transform:rotate(360deg);}}\n  @keyframes svgFlow{to{stroke-dashoffset:-18;}}\n  .flowline{stroke-dasharray:9 9;animation:svgFlow 0.7s linear infinite;}
+  .cond{font-family:'Barlow Condensed','Arial Narrow','Avenir Next Condensed',-apple-system,sans-serif;}
+  .tile{background:#131b22;border:1px solid #1f2b34;border-radius:14px;padding:22px;cursor:pointer;min-height:170px;display:flex;flex-direction:column;transition:border-color .15s;}
+  .tile:hover{border-color:#2fc4d1;}
+  .card{background:#131b22;border:1px solid #1f2b34;border-radius:14px;}
+  .label{font-size:13px;font-weight:700;letter-spacing:2.5px;color:#7d939e;}
+  .big{font-size:40px;font-weight:600;}
+  .sub{font-size:14px;color:#9fb4be;}
+  .navitem{display:flex;align-items:center;cursor:pointer;color:#7d939e;margin:3px 8px;border-radius:10px;
+    background:linear-gradient(180deg,rgba(255,255,255,0.035),rgba(0,0,0,0.12));
+    border:1px solid rgba(255,255,255,0.04);border-bottom-color:rgba(0,0,0,0.5);
+    box-shadow:0 2px 4px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.05);
+    transition:all .15s;}
+  .navitem:hover{background:linear-gradient(180deg,rgba(47,196,209,0.08),rgba(0,0,0,0.12));transform:translateY(-1px);box-shadow:0 4px 8px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.06);}
+  .navitem.on{color:#2fc4d1;
+    background:linear-gradient(180deg,rgba(0,0,0,0.35),rgba(47,196,209,0.10));
+    border-color:rgba(47,196,209,0.35);border-top-color:rgba(0,0,0,0.5);border-bottom-color:rgba(47,196,209,0.2);
+    box-shadow:inset 0 2px 6px rgba(0,0,0,0.55), 0 0 12px rgba(47,196,209,0.15);
+    transform:translateY(1px);}
+  .switch{width:72px;height:40px;border-radius:20px;background:#2a3844;position:relative;cursor:pointer;transition:background .2s;flex-shrink:0;}
+  .switch .knob{position:absolute;top:4px;left:4px;width:32px;height:32px;border-radius:50%;background:#fff;transition:left .2s;box-shadow:0 2px 6px rgba(0,0,0,0.4);}
+  .switch.on{background:#2fc4d1;} .switch.on .knob{left:36px;}
+  .stlbl{font-size:11px;font-weight:700;letter-spacing:1.5px;color:#7d939e;} .stlbl.on{color:#2fc4d1;}
+  .dot{width:8px;height:8px;border-radius:50%;background:#35d07f;display:inline-block;}
+  h2{font-size:32px;font-weight:600;letter-spacing:2px;margin:0 0 22px 0;}
+  #rail::-webkit-scrollbar{display:none;}
+  @keyframes navAlarm{0%,100%{background:linear-gradient(180deg,rgba(255,77,79,0.35),rgba(255,77,79,0.12));border-color:rgba(255,77,79,0.8);box-shadow:0 0 16px rgba(255,77,79,0.5), inset 0 1px 0 rgba(255,255,255,0.06);}50%{background:linear-gradient(180deg,rgba(255,255,255,0.035),rgba(0,0,0,0.12));border-color:rgba(255,77,79,0.3);box-shadow:0 2px 4px rgba(0,0,0,0.35);}}
+  .navitem.alarm{animation:navAlarm 1.1s ease-in-out infinite;}
+  .navitem.alarm svg{stroke:#ff4d4f !important;}
+  .navitem.alarm div:last-child{color:#ff4d4f !important;}
+  @media (max-height:760px){
+    #rail{width:166px !important;}
+    .navitem{height:48px !important;flex-direction:row !important;justify-content:flex-start !important;gap:10px !important;padding:0 12px !important;}
+    .navitem div:last-child{font-size:9px !important;}
+  }
+  @media (max-height:560px){
+    .navitem{height:42px !important;}
+    .navitem div:last-child{display:none;}
+  }
+  @media (max-width:1100px){
+    #main{padding:20px !important;}
+    #rail{width:125px !important;}
+    .navitem{height:56px !important;}
+  }
+  @media (max-width:760px){
+    #topbar{height:auto !important;flex-wrap:wrap;padding:10px 16px !important;gap:12px !important;}
+    #topbar img{height:52px !important;width:52px !important;}
+    #rail{width:78px !important;}
+    .navitem{height:52px !important;} .navitem div:last-child{display:none;}
+    #main{padding:14px !important;}
+    h2{font-size:24px;}
+  }
+</style>
+</head>
+<body>
+<div id="app" style="height:100vh;display:flex;flex-direction:column;overflow:hidden;position:relative;">
+  <div id="topbar" style="height:96px;display:flex;align-items:center;gap:24px;padding:0 28px;border-bottom:1px solid #1f2b34;background:#0d151b;flex-shrink:0;">
+    <div style="display:flex;align-items:center;gap:14px;">
+      <img src="uploads/lagoon-logo.png" alt="logo" style="height:88px;width:88px;object-fit:contain;" onerror="this.style.display='none'">
+      <div style="display:flex;align-items:baseline;gap:14px;">
+        <div class="cond" style="font-weight:600;font-size:24px;letter-spacing:10px;">LAGOON</div>
+        <div class="cond" style="font-weight:500;font-size:16px;letter-spacing:3px;color:#7d939e;">630 MOTOR YACHT</div>
+      </div>
+    </div>
+    <div style="flex:1;"></div>
+    <div id="alarmChip" onclick="go('batteries')" style="display:flex;align-items:center;gap:10px;height:40px;padding:0 16px;border-radius:8px;background:rgba(255,77,79,0.12);border:1px solid rgba(255,77,79,0.5);cursor:pointer;">
+      <div style="width:9px;height:9px;border-radius:50%;background:#ff4d4f;animation:pulseDot 1.2s infinite;"></div>
+      <div style="font-size:13px;font-weight:600;letter-spacing:1.5px;color:#ff8082;">SERVICE BATTERY LOW</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;"><span class="dot"></span><span style="font-size:13px;font-weight:600;letter-spacing:2px;color:#9fb4be;">LINKED</span></div>
+    <div id="clock" class="cond" style="font-size:22px;font-weight:600;min-width:56px;text-align:right;"></div>
+  </div>
+  <div style="flex:1;display:flex;min-height:0;">
+    <div id="rail" style="width:146px;flex-shrink:0;background:linear-gradient(90deg,#111c24 0%,#0d151b 55%,#0a1116 100%);border-right:1px solid #05090d;box-shadow:inset -1px 0 0 rgba(255,255,255,0.04), 4px 0 14px rgba(0,0,0,0.45);display:flex;flex-direction:column;padding-top:10px;z-index:5;overflow-y:auto;scrollbar-width:none;"></div>
+    <div id="main" style="flex:1;overflow:auto;padding:28px 36px;min-width:0;"></div>
+  </div>
+</div>
+<script>
+var S = {
+  screen:'home', navLights:false, anchorLight:true, nucLights:false, electronics:true, transfer:false,
+  lightPos:{navGreen:[1.5,56],navRed:[1.5,64],navStern:[98,52],anchor:[26,2],nuc1:[26,0],nuc2:[26,14]},
+  zones:{salon:true,cockpit:false,fly:false,cabins:true,under:false,courtesy:true},
+  shades:{port:0,stbd:0,front:100,aft:50},
+  night:false, lang:'EN', units:'L', dim:80,
+  autos:[{trig:'time',tv:'23:00',act:'lightsOff',on:true},{trig:'batt',tv:'30',act:'alert',on:true}],
+  nb:{trig:'time',tv:'23:00',act:'lightsOff'},
+  buses:{dom:true,pow:true,clim:true,gen:false},
+  av:{ tv:'down', amp:{on:true, vol:32, src:'BLUETOOTH', mute:false} },
+  alarm:true
+};
+/* VOMS-LIVE: telemetry fed from the C# onboard host (BoatDashboard/Ip2slClient).
+   Defaults below match the design demo values so the UI still reads well before
+   the first live update arrives. The C# host mutates this via window.vomsApply(). */
+var LIVE = {
+  ac:{ v:222, a:9, hz:50 },
+  tanks:{ waterPort:20, waterStbd:100, fuelAftPort:30, fuelFwdPort:28, fuelAftStbd:41, fuelFwdStbd:18 },
+  waterAvg:60, fuelAvg:29,
+  service:{ v:'0.0', low:true },
+  engines:{
+    port:{ name:'PORT ENGINE', rpm:850, temp:82, oil:4.2, hours:1240, fuel:6 },
+    stbd:{ name:'STBD ENGINE', rpm:850, temp:83, oil:4.1, hours:1236, fuel:6 },
+    seaTemp:24, roomTemp:38
+  }
+};
+var OK='#35d07f',WARN='#ffb648',BAD='#ff4d4f',ACC='#2fc4d1',DIM='#7d939e',TXT='#e8f0f2';
+var NAV=[['home','HOME'],['engines','ENGINES'],['ac','AC POWER'],['batteries','BATTERIES'],['tanks','TANKS'],['nav','NAV LIGHTS'],['lighting','LIGHTING'],['shades','SHADES'],['av','AV / MEDIA'],['electronics','ELECTRONICS'],['automation','AUTOMATION'],['system','SYSTEM'],['settings','SETTINGS']];
+var ZONES=[['salon','SALON'],['cockpit','COCKPIT'],['fly','FLYBRIDGE'],['cabins','CABINS'],['under','UNDERWATER'],['courtesy','COURTESY']];
+var BOAT='uploads/L620MY Profile 900x402.png';
+
+function go(id){S.screen=id;render();}
+function tgl(path){
+  if(path.indexOf('.')>0){var p=path.split('.');S[p[0]][p[1]]=!S[p[0]][p[1]];}
+  else S[path]=!S[path];
+  render();
+}
+function sw(on,action){return '<div class="switch'+(on?' on':'')+'" onclick="'+action+'"><div class="knob"></div></div>';}
+function swBlock(on,action){return '<div style="display:flex;flex-direction:column;align-items:center;gap:6px;">'+sw(on,action)+'<div class="stlbl'+(on?' on':'')+'">'+(on?'ON':'OFF')+'</div></div>';}
+
+function tank(name,pct,color){
+  var pc = pct<=20?BAD:(pct<=30?WARN:TXT);
+  var W=110, H=250, CAP=16; // cylinder proportions
+  var liquidTop = (100-pct); // % from top of shell
+  // liquid body: vertical position via inset top
+  var liq =
+    '<div style="position:absolute;left:0;right:0;bottom:0;top:'+liquidTop+'%;">'
+      // liquid column with cylindrical shading
+      +'<div style="position:absolute;inset:0;background:linear-gradient(90deg,'
+        +'color-mix(in oklab,'+color+' 55%, #000) 0%,'
+        +color+' 22%,'
+        +'color-mix(in oklab,'+color+' 60%, #fff) 46%,'
+        +color+' 70%,'
+        +'color-mix(in oklab,'+color+' 50%, #000) 100%);"></div>'
+      // liquid surface ellipse
+      +'<div style="position:absolute;left:0;right:0;top:-'+(CAP/2)+'px;height:'+CAP+'px;border-radius:50%;'
+        +'background:linear-gradient(90deg,color-mix(in oklab,'+color+' 70%, #fff) 0%, color-mix(in oklab,'+color+' 45%, #fff) 50%, color-mix(in oklab,'+color+' 70%, #fff) 100%);'
+        +'box-shadow:inset 0 2px 6px rgba(255,255,255,0.35), inset 0 -2px 5px rgba(0,0,0,0.25);"></div>'
+      // bottom curve of liquid
+      +'<div style="position:absolute;left:0;right:0;bottom:-'+(CAP/2)+'px;height:'+CAP+'px;border-radius:50%;background:color-mix(in oklab,'+color+' 60%, #000);"></div>'
+    +'</div>';
+  // graduation ticks at 25/50/75
+  var ticks=[25,50,75].map(function(t){
+    return '<div style="position:absolute;left:6px;right:6px;top:'+(100-t)+'%;height:1px;background:rgba(255,255,255,0.10);"></div>'
+      +'<div style="position:absolute;right:8px;top:calc('+(100-t)+'% - 7px);font-size:9px;color:rgba(255,255,255,0.35);letter-spacing:0.5px;">'+t+'</div>';
+  }).join('');
+  return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:12px;">'
+    +'<div style="width:100%;max-width:'+W+'px;position:relative;padding-top:'+(CAP/2)+'px;">'
+      // top rim ellipse (open tank mouth)
+      +'<div style="position:absolute;top:0;left:0;right:0;height:'+CAP+'px;border-radius:50%;'
+        +'background:linear-gradient(180deg,#2c3d4b,#141d25);border:1px solid rgba(255,255,255,0.12);z-index:2;"></div>'
+      // shell
+      +'<div style="position:relative;height:'+H+'px;border-radius:0 0 '+(W/2)+'px '+(W/2)+'px / 0 0 '+CAP+'px '+CAP+'px;overflow:hidden;'
+        +'background:linear-gradient(90deg,#0c1218 0%,#1c2833 20%,#26343f 46%,#1c2833 72%,#0a0f14 100%);'
+        +'box-shadow:inset 0 -10px 18px rgba(0,0,0,0.55), 0 14px 24px -10px rgba(0,0,0,0.7);">'
+        +liq
+        +ticks
+        // glass highlight streak over everything
+        +'<div style="position:absolute;top:0;bottom:0;left:16%;width:12%;background:linear-gradient(90deg,rgba(255,255,255,0) 0%,rgba(255,255,255,0.16) 50%,rgba(255,255,255,0) 100%);pointer-events:none;"></div>'
+        +'<div style="position:absolute;top:0;bottom:0;right:6%;width:5%;background:linear-gradient(90deg,rgba(255,255,255,0) 0%,rgba(255,255,255,0.07) 50%,rgba(255,255,255,0) 100%);pointer-events:none;"></div>'
+      +'</div>'
+      // floor shadow
+      +'<div style="position:absolute;left:-8%;right:-8%;bottom:-14px;height:18px;border-radius:50%;background:radial-gradient(ellipse at center,rgba(0,0,0,0.55) 0%,rgba(0,0,0,0) 70%);"></div>'
+    +'</div>'
+    +'<div class="cond" style="font-size:30px;font-weight:600;color:'+pc+';margin-top:4px;">'+pct+'%</div>'
+    +'<div style="font-size:12px;font-weight:600;letter-spacing:1.5px;color:#9fb4be;text-align:center;">'+name+'</div></div>';
+}
+
+var SCREENS = {
+home: function(){
+  var zOn = ZONES.filter(function(z){return S.zones[z[0]];});
+  var tk=LIVE.tanks, fc=function(p){return p<=20?BAD:WARN;};
+  var minis=[['W1',tk.waterPort,ACC],['W2',tk.waterStbd,ACC],['F1',tk.fuelAftPort,fc(tk.fuelAftPort)],['F2',tk.fuelFwdPort,fc(tk.fuelFwdPort)],['F3',tk.fuelAftStbd,fc(tk.fuelAftStbd)],['F4',tk.fuelFwdStbd,fc(tk.fuelFwdStbd)]];
+  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;">'
+  +'<div class="tile" onclick="go(\'ac\')"><div class="label">AC POWER</div><div style="flex:1"></div>'
+    +'<div class="cond big">'+LIVE.ac.v+' V <span style="font-size:22px;color:#7d939e;">· '+LIVE.ac.a+' A · '+LIVE.ac.hz+' Hz</span></div>'
+    +'<div class="sub" style="margin-top:6px;"><span class="dot"></span> Shore 1 &amp; 2 connected · Generator standby</div></div>'
+  +'<div class="tile" onclick="go(\'batteries\')" style="border-color:'+(S.alarm?'rgba(255,77,79,0.6)':'#1f2b34')+';"><div class="label">BATTERIES</div><div style="flex:1"></div>'
+    +'<div class="cond big" style="color:'+(S.alarm?BAD:TXT)+';">'+LIVE.service.v+' V <span style="font-size:22px;color:#7d939e;">service bank</span></div>'
+    +'<div class="sub" style="margin-top:6px;"><span class="dot" style="background:'+(S.alarm?BAD:OK)+';"></span> '+(S.alarm?'Low battery level — check service bank':'All banks healthy')+'</div></div>'
+  +'<div class="tile" onclick="go(\'tanks\')"><div class="label">TANKS</div><div style="flex:1"></div>'
+    +'<div style="display:flex;align-items:flex-end;gap:10px;height:64px;">'
+    +minis.map(function(m){return '<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;gap:4px;"><div style="height:'+m[1]+'%;background:'+m[2]+';border-radius:3px;min-height:3px;"></div><div style="font-size:10px;letter-spacing:1px;color:#7d939e;text-align:center;">'+m[0]+'</div></div>';}).join('')
+    +'</div><div class="sub" style="margin-top:10px;">Fresh water '+LIVE.waterAvg+'% · Fuel '+LIVE.fuelAvg+'%</div></div>'
+  +'<div class="tile" onclick="go(\'nav\')"><div class="label">NAV LIGHTS</div><div style="flex:1"></div>'
+    +'<div class="cond big" style="color:'+(S.navLights||S.anchorLight?TXT:DIM)+';">'+(S.navLights?'UNDERWAY':(S.anchorLight?'AT ANCHOR':'ALL OFF'))+'</div>'
+    +'<div class="sub" style="margin-top:6px;">'+(S.navLights?'Nav lights on':'Nav lights off')+' · '+(S.anchorLight?'Anchor light on':'Anchor light off')+'</div></div>'
+  +'<div class="tile" onclick="go(\'lighting\')"><div class="label">LIGHTING</div><div style="flex:1"></div>'
+    +'<div class="cond big">'+zOn.length+' <span style="font-size:22px;color:#7d939e;">of 6 zones on</span></div>'
+    +'<div class="sub" style="margin-top:6px;">'+(zOn.map(function(z){return z[1].charAt(0)+z[1].slice(1).toLowerCase();}).join(' · ')||'All off')+'</div></div>'
+  +'<div class="tile" onclick="go(\'electronics\')"><div class="label">ELECTRONICS</div><div style="flex:1"></div>'
+    +'<div class="cond big" style="color:'+(S.electronics?OK:DIM)+';">'+(S.electronics?'ON':'OFF')+'</div>'
+    +'<div class="sub" style="margin-top:6px;">Instruments · Autopilot · VHF</div></div>'
+  +'</div>'
+  +'<div class="card" style="margin-top:20px;padding:18px 22px;display:flex;align-items:center;gap:24px;">'
+    +'<img src="'+BOAT+'" style="height:74px;" onerror="this.style.display=\'none\'">'
+    +'<div style="flex:1;"><div style="font-size:15px;font-weight:600;">All systems nominal except service battery bank</div>'
+    +'<div style="font-size:13px;color:#7d939e;margin-top:4px;">E-Plex bus healthy · 18 of 19 nodes online · Last sync 2 s ago</div></div>'
+    +'<div onclick="go(\'system\')" style="height:44px;padding:0 20px;display:flex;align-items:center;border-radius:8px;border:1px solid #2fc4d1;color:#2fc4d1;font-size:13px;font-weight:700;letter-spacing:2px;cursor:pointer;">SYSTEM STATUS</div></div>';
+},
+ac: function(){
+  var dOn=S.buses.dom, pOn=S.buses.pow, cOn=S.buses.clim;
+  var defs='<defs>'
+    +'<linearGradient id="acPanel" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#18232c"/><stop offset="1" stop-color="#0c1319"/></linearGradient>'
+    +'<linearGradient id="acNode" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1e2c37"/><stop offset="0.12" stop-color="#16212b"/><stop offset="1" stop-color="#0e161d"/></linearGradient>'
+    +'<linearGradient id="acBusOn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7fe8b3"/><stop offset="0.4" stop-color="#35d07f"/><stop offset="1" stop-color="#1d8a54"/></linearGradient>'
+    +'<linearGradient id="acBusOff" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a4a58"/><stop offset="0.4" stop-color="#2a3844"/><stop offset="1" stop-color="#1a242d"/></linearGradient>'
+    +'<linearGradient id="acBrk" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3f5262"/><stop offset="0.15" stop-color="#1a2630"/><stop offset="0.85" stop-color="#111a22"/><stop offset="1" stop-color="#2b3a47"/></linearGradient>'
+    +'<radialGradient id="acScrew" cx="0.35" cy="0.3" r="0.9"><stop offset="0" stop-color="#8ba0ac"/><stop offset="0.6" stop-color="#42566" stop-opacity="0.9"/><stop offset="1" stop-color="#1a242d"/></radialGradient>'
+    +'<filter id="acDrop" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#000" flood-opacity="0.55"/></filter>'
+    +'<filter id="acGlow" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="4"/></filter>'
+  +'</defs>';
+  function screw(x,y){return '<circle cx="'+x+'" cy="'+y+'" r="4" fill="url(#acScrew)" stroke="#0a1116" stroke-width="0.8"/><line x1="'+(x-2.2)+'" y1="'+y+'" x2="'+(x+2.2)+'" y2="'+y+'" stroke="#0d151b" stroke-width="1" transform="rotate(35 '+x+' '+y+')"/>';}
+  function srcNode(x,name,v,sub,live){
+    return '<g filter="url(#acDrop)">'
+      +'<rect x="'+(x-85)+'" y="28" width="170" height="90" rx="12" fill="url(#acNode)" stroke="'+(live?'rgba(53,208,127,0.55)':'#243240')+'" stroke-width="1.5"/>'
+      +'<rect x="'+(x-85)+'" y="28" width="170" height="12" rx="12" fill="#fff" opacity="0.05"/>'
+      +screw(x-73,40)+screw(x+73,40)+screw(x-73,106)+screw(x+73,106)
+      +'<circle cx="'+(x-62)+'" cy="58" r="4.5" fill="'+(live?OK:'#2a3844')+'"'+(live?' filter="url(#acGlow)"':'')+'/>'
+      +(live?'<circle cx="'+(x-62)+'" cy="58" r="3" fill="#b8f5d6"/>':'')
+      +'<text x="'+(x-50)+'" y="62" font-size="11.5" font-weight="700" letter-spacing="1.5" fill="#9fb4be">'+name+'</text>'
+      +'<text x="'+(x-62)+'" y="90" font-size="24" font-weight="600" font-family="Barlow Condensed,Arial Narrow,sans-serif" fill="'+(live?'#e8f0f2':'#7d939e')+'">'+v+'</text>'
+      +'<text x="'+(x-62)+'" y="106" font-size="10.5" fill="#7d939e">'+sub+'</text>'
+    +'</g>';}
+  function busNode(x,name,v,on){
+    return '<g>'
+      +(on?'<rect x="'+(x-124)+'" y="388" width="248" height="22" rx="9" fill="'+OK+'" opacity="0.35" filter="url(#acGlow)"/>':'')
+      +'<rect x="'+(x-120)+'" y="390" width="240" height="18" rx="7" fill="url(#acBus'+(on?'On':'Off')+')" stroke="'+(on?'#1d8a54':'#141d25')+'" stroke-width="1" filter="url(#acDrop)"/>'
+      +'<rect x="'+(x-114)+'" y="392.5" width="228" height="5" rx="2.5" fill="#fff" opacity="'+(on?0.45:0.12)+'"/>'
+      +'<text x="'+x+'" y="432" text-anchor="middle" font-size="13" font-weight="700" letter-spacing="2" fill="'+(on?'#e8f0f2':'#5d7280')+'">'+name+'</text>'
+      +'<text x="'+x+'" y="452" text-anchor="middle" font-size="13" font-family="Barlow Condensed,Arial Narrow,sans-serif" font-weight="600" fill="'+(on?OK:BAD)+'">'+(on?v:'DE-ENERGIZED')+'</text>'
+    +'</g>';}
+  function wire(pts,live){
+    return '<polyline points="'+pts+'" fill="none" stroke="#05090d" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>'
+      +'<polyline points="'+pts+'" fill="none" stroke="'+(live?'#123527':'#222e38')+'" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>'
+      +(live?'<polyline points="'+pts+'" fill="none" stroke="'+OK+'" stroke-opacity="0.5" stroke-width="6" filter="url(#acGlow)"/>':'')
+      +'<polyline points="'+pts+'" fill="none" stroke="'+(live?OK:'#37485a')+'" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"'+(live?' class="flowline"':'')+'/>';}
+  function dashedWire(pts){return '<polyline points="'+pts+'" fill="none" stroke="#05090d" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/><polyline points="'+pts+'" fill="none" stroke="#3a4c5c" stroke-width="2" stroke-dasharray="5 6" stroke-linecap="round"/>';}
+  // physical rocker breaker
+  function breaker(x,y,on,key){
+    var col=on?OK:BAD;
+    return '<g onclick="tgl(&quot;buses.'+key+'&quot;)" style="cursor:pointer;" filter="url(#acDrop)">'
+      +'<rect x="'+(x-30)+'" y="'+(y-34)+'" width="60" height="68" rx="10" fill="url(#acBrk)" stroke="#0a1116" stroke-width="1.5"/>'
+      +'<rect x="'+(x-30)+'" y="'+(y-34)+'" width="60" height="10" rx="10" fill="#fff" opacity="0.06"/>'
+      +screw(x-21,y-25)+screw(x+21,y-25)+screw(x-21,y+25)+screw(x+21,y+25)
+      // recessed rocker slot
+      +'<rect x="'+(x-11)+'" y="'+(y-24)+'" width="22" height="48" rx="6" fill="#05090d"/>'
+      // rocker: up=closed(green) down=open(red)
+      +'<rect x="'+(x-9)+'" y="'+(on?(y-22):(y-2))+'" width="18" height="24" rx="5" fill="'+(on?'#2f4a3d':'#4a2f33')+'" stroke="'+col+'" stroke-width="1.2"/>'
+      +'<rect x="'+(x-6)+'" y="'+(on?(y-19):(y+1))+'" width="12" height="4" rx="2" fill="'+col+'"'+(on?' filter="url(#acGlow)"':'')+'/>'
+      +'<text x="'+x+'" y="'+(y+50)+'" text-anchor="middle" font-size="10" font-weight="700" letter-spacing="1.5" fill="'+col+'">'+(on?'CLOSED':'OPEN')+'</text>'
+    +'</g>';}
+  var svg='<svg viewBox="0 0 1000 480" style="width:100%;max-width:1180px;display:block;margin:0 auto;">'
+    +defs
+    +'<rect x="4" y="4" width="992" height="472" rx="18" fill="url(#acPanel)" stroke="#243240" stroke-width="1.5"/>'
+    +'<rect x="4" y="4" width="992" height="20" rx="18" fill="#fff" opacity="0.035"/>'
+    +screw(24,24)+screw(976,24)+screw(24,456)+screw(976,456)
+    +'<text x="500" y="22" text-anchor="middle" font-size="11" font-weight="700" letter-spacing="4" fill="#54687a">AC DISTRIBUTION \u2014 SINGLE LINE</text>'
+    +wire('150,118 150,236',true)+wire('150,304 150,390',dOn)
+    +wire('230,118 230,236',true)+wire('230,304 230,360 500,360 500,390',pOn)
+    +wire('830,118 830,236',true)+wire('830,304 830,390',cOn)
+    // junction nodes
+    +dashedWire('390,118 390,236')+dashedWire('390,304 390,360')+'<circle cx="390" cy="360" r="5.5" fill="#0a1218" stroke="#3a4c5c" stroke-width="2"/>'+dashedWire('610,118 610,148')
+    // live current labels on feeders
+    +(dOn?'<g><rect x="84" y="330" width="52" height="20" rx="5" fill="#0a1218" stroke="#1d3a2b"/><text x="110" y="344" text-anchor="middle" font-size="11" font-weight="700" font-family="Barlow Condensed,Arial Narrow,sans-serif" fill="'+OK+'">6.2 A</text></g>':'')
+    +(pOn?'<g><rect x="246" y="318" width="52" height="20" rx="5" fill="#0a1218" stroke="#1d3a2b"/><text x="272" y="332" text-anchor="middle" font-size="11" font-weight="700" font-family="Barlow Condensed,Arial Narrow,sans-serif" fill="'+OK+'">2.8 A</text></g>':'')
+    +(cOn?'<g><rect x="846" y="330" width="52" height="20" rx="5" fill="#0a1218" stroke="#1d3a2b"/><text x="872" y="344" text-anchor="middle" font-size="11" font-weight="700" font-family="Barlow Condensed,Arial Narrow,sans-serif" fill="'+OK+'">6.0 A</text></g>':'')
+    // breaker name tags
+    +'<text x="96" y="274" text-anchor="end" font-size="10" font-weight="700" letter-spacing="1.5" fill="#54687a">DOMESTIC</text>'
+    +'<text x="284" y="274" text-anchor="start" font-size="10" font-weight="700" letter-spacing="1.5" fill="#54687a">POWER</text>'
+    +'<text x="776" y="274" text-anchor="end" font-size="10" font-weight="700" letter-spacing="1.5" fill="#54687a">A/C</text>'
+    +'<circle cx="150" cy="118" r="4" fill="'+OK+'"/>'
+    +'<circle cx="230" cy="118" r="4" fill="'+OK+'"/>'
+    +'<circle cx="830" cy="118" r="4" fill="'+OK+'"/>'
+    +'<circle cx="390" cy="118" r="4" fill="#37485a"/>'
+    +'<circle cx="610" cy="118" r="4" fill="#37485a"/>'
+    +srcNode(170,'SHORE POWER 1','222 V','9 A \u00b7 50.0 Hz',true)
+    +srcNode(390,'GENERATOR','0 V','Standby',false)
+    +srcNode(610,'INVERTERS','\u2014','Pass-through',false)
+    +srcNode(830,'SHORE POWER 2','237 V','6 A \u00b7 59.9 Hz',true)
+    +breaker(150,270,dOn,'dom')
+    +breaker(230,270,pOn,'pow')
+    +breaker(390,270,S.buses.gen,'gen')
+    +'<text x="444" y="274" text-anchor="start" font-size="10" font-weight="700" letter-spacing="1.5" fill="#54687a">GEN</text>'
+    +breaker(830,270,cOn,'clim')
+    +busNode(190,'DOMESTIC BUS','222 V \u00b7 50 Hz',dOn)
+    +busNode(500,'POWER BUS','222 V \u00b7 50 Hz',pOn)
+    +busNode(810,'A/C BUS','237 V \u00b7 60 Hz',cOn)
+  +'</svg>';
+  return '<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:14px;"><h2 class="cond" style="margin:0;">AC POWER</h2><div class="sub">Single-line diagram \u00b7 tap a breaker to open / close</div></div>'
+  +'<div style="filter:drop-shadow(0 16px 30px rgba(0,0,0,0.5));">'+svg+'</div>';
+},
+batteries: function(){
+  var svc=S.alarm?['0.0','-3276.8',0,true]:['26.4','-12.5',100,false];
+  var bats=[['GENERATOR BATTERY','13.4','+1.0',93,false],['ENGINE BATTERY · PORT','13.5','0.0',96,false],['SERVICE BANK · 24V',svc[0],svc[1],svc[2],svc[3]],['ENGINE BATTERY · STBD','13.4','0.0',93,false]];
+  function gauge(soc,bad){
+    var col = bad?BAD:(soc<40?WARN:OK);
+    var uid='g'+Math.round(Math.random()*1e9);
+    var CX=100, CY=100;
+    // 270-degree sweep starting at 135deg
+    function pt(pct,r){var a=(135+pct*2.7)*Math.PI/180;return [CX+Math.cos(a)*r, CY+Math.sin(a)*r];}
+    function arcPath(from,to,r){
+      var p0=pt(from,r), p1=pt(to,r), large=(to-from)*2.7>180?1:0;
+      return 'M '+p0[0].toFixed(2)+' '+p0[1].toFixed(2)+' A '+r+' '+r+' 0 '+large+' 1 '+p1[0].toFixed(2)+' '+p1[1].toFixed(2);
+    }
+    // fine ticks every 2.5%, majors every 10%
+    var ticks='';
+    for(var i=0;i<=40;i++){
+      var p=i*2.5, major=(i%4===0);
+      var o=pt(p,79), n=pt(p,major?68:74);
+      var lit=p<=soc;
+      ticks+='<line x1="'+o[0].toFixed(1)+'" y1="'+o[1].toFixed(1)+'" x2="'+n[0].toFixed(1)+'" y2="'+n[1].toFixed(1)+'" stroke="'+(lit?col:'#26333e')+'" stroke-width="'+(major?2.4:1)+'" stroke-linecap="round" opacity="'+(lit?(major?1:0.75):(major?0.8:0.45))+'"/>';
+      if(major){
+        var l=pt(p,58);
+        ticks+='<text x="'+l[0].toFixed(1)+'" y="'+(l[1]+3.5).toFixed(1)+'" text-anchor="middle" font-size="10" font-weight="600" font-family="Barlow Condensed,Arial Narrow,sans-serif" fill="'+(lit?'#b7c8d2':'#54687a')+'">'+(i/4*10)+'</text>';
+      }
+    }
+    // value arc as path (r=86, just inside bezel)
+    var arcR=87;
+    var track=arcPath(0,100,arcR);
+    var value=soc>0?arcPath(0,Math.max(soc,0.5),arcR):'';
+    // danger zone marks near start
+    var zone=arcPath(0,20,79.5);
+    // tapered needle polygon pointing right (0deg), rotated via transform
+    var needleAngle=135+soc*2.7;
+    var needle='<g style="transform-origin:100px 100px;animation:gaugeSweep 1.4s cubic-bezier(.2,.8,.3,1) 1;">'
+      +'<g style="transform-origin:100px 100px;animation:needleWobble '+(2.4+(soc%5)*0.35)+'s ease-in-out infinite;">'
+      +'<g transform="rotate('+needleAngle.toFixed(1)+' 100 100)">'
+        +'<polygon points="100,96.8 168,99 172,100 168,101 100,103.2 88,101.5 88,98.5" fill="url(#'+uid+'nd)" style="filter:drop-shadow(0 2px 3px rgba(0,0,0,0.9));"/>'
+        +'<polygon points="150,98.2 172,100 150,101.8" fill="'+(bad?BAD:'#ff5b5d')+'"/>'
+      +'</g></g></g>';
+    return '<div style="position:relative;width:190px;height:190px;flex-shrink:0;filter:drop-shadow(0 12px 22px rgba(0,0,0,0.55));">'
+      +'<svg width="190" height="190" viewBox="0 0 200 200" style="display:block;">'
+        +'<defs>'
+          +'<linearGradient id="'+uid+'bz" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4a5f70"/><stop offset="0.22" stop-color="#1b2731"/><stop offset="0.55" stop-color="#0e161d"/><stop offset="0.85" stop-color="#243441"/><stop offset="1" stop-color="#384b5a"/></linearGradient>'
+          +'<radialGradient id="'+uid+'fc" cx="0.5" cy="0.36" r="0.8"><stop offset="0" stop-color="#1d2a35"/><stop offset="0.6" stop-color="#101a22"/><stop offset="0.92" stop-color="#080e13"/><stop offset="1" stop-color="#05090d"/></radialGradient>'
+          +'<linearGradient id="'+uid+'nd" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4f9fb"/><stop offset="0.5" stop-color="#c2d2da"/><stop offset="1" stop-color="#8ba0ac"/></linearGradient>'
+          +'<radialGradient id="'+uid+'hub" cx="0.38" cy="0.34" r="0.9"><stop offset="0" stop-color="#6d8494"/><stop offset="0.5" stop-color="#31424f"/><stop offset="1" stop-color="#141e26"/></radialGradient>'
+          +'<radialGradient id="'+uid+'gl" cx="0.5" cy="0.26" r="0.62"><stop offset="0" stop-color="#fff" stop-opacity="0.13"/><stop offset="0.65" stop-color="#fff" stop-opacity="0.025"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>'
+          +'<linearGradient id="'+uid+'arc" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="'+col+'" stop-opacity="0.55"/><stop offset="1" stop-color="'+col+'"/></linearGradient>'
+        +'</defs>'
+        // bezel: outer chrome, inner recess, face
+        +'<circle cx="100" cy="100" r="98" fill="url(#'+uid+'bz)"/>'
+        +'<circle cx="100" cy="100" r="92.5" fill="#040709"/>'
+        +'<circle cx="100" cy="100" r="91" fill="url(#'+uid+'fc)"/>'
+        // track + value arc
+        +'<path d="'+track+'" fill="none" stroke="#050a0e" stroke-width="7" stroke-linecap="round"/>'
+        +'<path d="'+track+'" fill="none" stroke="#1e2b35" stroke-width="4.5" stroke-linecap="round"/>'
+        +(value?'<path d="'+value+'" fill="none" stroke="'+col+'" stroke-opacity="0.35" stroke-width="9" stroke-linecap="round" style="filter:blur(3.5px);animation:arcBreath 3s ease-in-out infinite;"/>':'')
+        +(value?'<path d="'+value+'" fill="none" stroke="url(#'+uid+'arc)" stroke-width="4.5" stroke-linecap="round"/>':'')
+        // red danger zone
+        +'<path d="'+zone+'" fill="none" stroke="'+BAD+'" stroke-opacity="0.5" stroke-width="2.5"/>'
+        +ticks
+        // label on dial
+        +'<text x="100" y="66" text-anchor="middle" font-size="9" font-weight="700" letter-spacing="3" fill="#54687a">CHARGE</text>'
+        +needle
+        // hub
+        +'<circle cx="100" cy="100" r="11" fill="url(#'+uid+'hub)" stroke="#0a1116" stroke-width="1.5"/>'
+        +'<circle cx="97" cy="97" r="3.2" fill="rgba(255,255,255,0.3)"/>'
+        // digital readout window
+        +'<rect x="70" y="126" width="60" height="26" rx="5" fill="#04080b" stroke="#233240" stroke-width="1"/>'
+        +'<text x="100" y="144" text-anchor="middle" font-size="15" font-weight="700" font-family="Barlow Condensed,Arial Narrow,sans-serif" fill="'+(bad?BAD:col)+'" style="'+(bad?'animation:pulseDot 1.2s infinite;':'')+'">'+soc+'<tspan font-size="9" fill="#5d7280"> %</tspan></text>'
+        // glass highlight
+        +'<ellipse cx="100" cy="62" rx="70" ry="38" fill="url(#'+uid+'gl)"/>'
+        +'<g style="transform-origin:100px 100px;animation:sheenSpin 11s linear infinite;"><path d="M 100 8 A 92 92 0 0 1 178 55 L 158 70 A 68 68 0 0 0 100 32 Z" fill="#fff" opacity="0.045"/></g>'
+      +'</svg>'
+    +'</div>';
+  }
+  return '<h2 class="cond">BATTERIES</h2><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(460px,1fr));gap:18px;">'
+  +bats.map(function(b){var bad=b[4];
+    return '<div class="card" style="padding:20px 24px;border-color:'+(bad?'rgba(255,77,79,0.6)':'#1f2b34')+';display:flex;align-items:center;gap:26px;">'
+    +gauge(b[3],bad)
+    +'<div style="flex:1;min-width:0;">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;"><div style="font-size:13px;font-weight:700;letter-spacing:2px;min-width:0;">'+b[0]+'</div>'
+      +'<div style="font-size:11px;font-weight:700;letter-spacing:1.5px;padding:5px 10px;border-radius:6px;flex-shrink:0;white-space:nowrap;background:'+(bad?'rgba(255,77,79,0.15)':'rgba(53,208,127,0.12)')+';color:'+(bad?BAD:OK)+';">'+(bad?'ALARM':'HEALTHY')+'</div></div>'
+      +'<div style="display:flex;align-items:baseline;gap:22px;margin-top:14px;flex-wrap:wrap;"><div class="cond" style="font-size:46px;font-weight:600;line-height:1;white-space:nowrap;color:'+(bad?BAD:TXT)+';">'+b[1]+'<span style="font-size:24px;color:#7d939e;">&nbsp;V</span></div>'
+      +'<div class="cond" style="font-size:26px;color:#9fb4be;">'+b[2]+' A</div></div>'
+      +'<div style="display:flex;gap:18px;margin-top:14px;font-size:12px;color:#7d939e;">'
+        +'<div><span style="color:#9fb4be;font-weight:600;">'+(bad?'—':(b[2].charAt(0)==='+'?'Charging':'Float'))+'</span> · state</div>'
+        +'<div><span style="color:#9fb4be;font-weight:600;">'+(bad?'No data':'28 °C')+'</span> · temp</div>'
+      +'</div>'
+    +'</div></div>';}).join('')
+  +'</div>'
+  +(S.alarm?'<div style="margin-top:18px;border-radius:12px;border:1px solid rgba(255,77,79,0.5);background:rgba(255,77,79,0.08);padding:16px 20px;display:flex;align-items:center;gap:14px;"><div style="width:10px;height:10px;border-radius:50%;background:#ff4d4f;animation:pulseDot 1.2s infinite;flex-shrink:0;"></div><div style="font-size:14px;color:#ffb3b4;"><b>Low battery level.</b> Service bank reads 0.0 V — check the main service breaker and shunt connection. Loads on the domestic bus are running from shore power.</div></div>':'');
+},
+tanks: function(){
+  return '<h2 class="cond">TANKS</h2><div style="display:flex;gap:28px;align-items:stretch;flex-wrap:wrap;">'
+  +'<div class="card" style="padding:24px;flex:1;min-width:300px;"><div style="font-size:12px;font-weight:700;letter-spacing:2px;color:#7d939e;margin-bottom:18px;">FRESH WATER</div>'
+  +'<div style="display:flex;gap:24px;">'+tank('PORT',20,ACC)+tank('STARBOARD',100,ACC)+'</div></div>'
+  +'<div class="card" style="padding:24px;flex:2;min-width:420px;display:flex;flex-direction:column;">'
+  +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;"><div style="font-size:12px;font-weight:700;letter-spacing:2px;color:#7d939e;">DIESEL</div>'
+  +'<div onclick="tgl(\'transfer\')" style="height:44px;padding:0 20px;display:flex;align-items:center;border-radius:8px;border:1px solid '+(S.transfer?WARN:ACC)+';background:'+(S.transfer?'rgba(255,182,72,0.15)':'transparent')+';color:'+(S.transfer?WARN:ACC)+';font-size:13px;font-weight:700;letter-spacing:1.5px;cursor:pointer;">'+(S.transfer?'TRANSFERRING · TAP TO STOP':'START FUEL TRANSFER')+'</div></div>'
+  +'<div style="display:flex;gap:24px;flex:1;">'+tank('AFT PORT',30,WARN)+tank('FWD PORT',28,WARN)+tank('AFT STBD',41,WARN)+tank('FWD STBD',18,WARN)+'</div></div></div>';
+},
+nav: function(){
+  var P=S.lightPos;
+  function lamp(key,color,glow,visible){
+    var p=P[key];
+    return '<div onpointerdown="dragLight(event,\''+key+'\')" title="drag to reposition" style="position:absolute;left:'+p[0]+'%;top:'+p[1]+'%;width:22px;height:22px;margin:-11px;border-radius:50%;cursor:grab;touch-action:none;display:'+(visible?'block':'none')+';">'
+      +'<div style="position:absolute;inset:3px;border-radius:50%;background:'+color+';box-shadow:0 0 18px 6px '+glow+';pointer-events:none;"></div>'
+    +'</div>';
+  }
+  var dots=lamp('navGreen','#35d07f','rgba(53,208,127,0.7)',S.navLights)
+    +lamp('navRed','#ff4d4f','rgba(255,77,79,0.7)',S.navLights)
+    +lamp('navStern','#fff','rgba(255,255,255,0.6)',S.navLights)
+    +lamp('anchor','#fff','rgba(255,255,255,0.6)',S.anchorLight&&!S.nucLights)
+    +lamp('nuc1','#ff4d4f','rgba(255,77,79,0.75)',S.nucLights)
+    +lamp('nuc2','#ff4d4f','rgba(255,77,79,0.75)',S.nucLights);
+  var rows=[['NAVIGATION LIGHTS','Port red + starboard green sidelights, stern light','navLights',S.navLights],['ANCHOR LIGHT','All-round white, masthead','anchorLight',S.anchorLight],['NUC LIGHTS','Not Under Command · 2 all-round red, vertical','nucLights',S.nucLights]];
+  return '<h2 class="cond" style="margin-bottom:14px;">NAVIGATION LIGHTS</h2>'
+  +(S.nucLights?'<div style="margin-bottom:18px;border-radius:12px;border:1px solid rgba(255,77,79,0.5);background:rgba(255,77,79,0.08);padding:12px 18px;display:flex;align-items:center;gap:12px;"><div style="width:9px;height:9px;border-radius:50%;background:#ff4d4f;animation:pulseDot 1.2s infinite;flex-shrink:0;"></div><div style="font-size:13px;font-weight:600;letter-spacing:1px;color:#ffb3b4;">NOT UNDER COMMAND — vessel unable to manoeuvre. Sidelights + stern light stay on only if making way.</div></div>':'')
+  +'<div style="display:flex;gap:24px;align-items:stretch;flex-wrap:wrap;min-height:0;">'
+  +'<div class="card" style="flex:2;padding:20px;display:flex;align-items:center;justify-content:center;min-width:min(100%,420px);"><div id="lightCanvas" style="position:relative;aspect-ratio:900/402;width:min(100%, calc((100vh - 320px) * 2.24));margin:0 auto;"><img src="'+BOAT+'" style="width:100%;height:100%;object-fit:contain;display:block;" onerror="this.parentNode.innerHTML=\'<div style=&quot;color:#7d939e;padding:60px;text-align:center;&quot;>Boat profile image</div>\'">'+dots+'</div></div>'
+  +'<div style="flex:1;display:flex;flex-direction:column;gap:12px;min-width:min(100%,300px);">'
+  +rows.map(function(r){return '<div class="card" style="padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-shrink:0;"><div><div style="font-size:14px;font-weight:700;letter-spacing:1.5px;">'+r[0]+'</div><div style="font-size:13px;color:#7d939e;margin-top:4px;">'+r[1]+'</div></div>'+swBlock(r[3],"tgl('"+r[2]+"')")+'</div>';}).join('')
+  +'<div style="background:rgba(47,196,209,0.06);border:1px solid rgba(47,196,209,0.25);border-radius:14px;padding:14px 18px;font-size:12px;color:#9fb4be;line-height:1.5;flex-shrink:0;">Underway at night: navigation lights. At anchor: anchor light only. Not under command: two all-round red lights in a vertical line. All are shown live on the profile view. <b style="color:#2fc4d1;">Drag any lit lamp on the picture to set its exact position — saved automatically.</b></div></div></div>';
+},
+lighting: function(){
+  var zOn=ZONES.filter(function(z){return S.zones[z[0]];}).length;
+  var names={salon:'SALON',cockpit:'COCKPIT',fly:'FLYBRIDGE',cabins:'CABINS',under:'UNDERWATER',courtesy:'COURTESY'};
+  // lamp clusters on the plan: [key, left%, top%]
+  var spots=[
+    ['salon',44,52],['salon',56,52],['salon',50,60],
+    ['cockpit',42,74],['cockpit',58,74],
+    ['fly',50,44],
+    ['cabins',16,48],['cabins',84,48],['cabins',16,62],['cabins',84,62],
+    ['under',20,90],['under',80,90],
+    ['courtesy',14,30],['courtesy',86,30],['courtesy',14,76],['courtesy',86,76]
+  ];
+  var dots=spots.map(function(p){
+    var on=S.zones[p[0]];
+    return '<div onclick="tgl(\'zones.'+p[0]+'\')" title="'+names[p[0]]+'" style="position:absolute;left:'+p[1]+'%;top:'+p[2]+'%;width:22px;height:22px;margin:-11px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;'
+      +'background:'+(on?'radial-gradient(circle at 38% 34%, #fff7dd, #ffd66b 55%, #e0a92f)':'#c8d2d8')+';'
+      +'border:2px solid '+(on?'#b9891f':'#8a99a3')+';'
+      +(on?'box-shadow:0 0 22px 8px rgba(255,196,60,0.65), 0 2px 4px rgba(0,0,0,0.3);':'box-shadow:0 1px 3px rgba(0,0,0,0.25);')
+      +'"></div>';
+  }).join('');
+  return '<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px;">'
+    +'<h2 class="cond" style="margin:0;">LIGHTING</h2>'
+    +'<div class="sub">'+zOn+' of 6 zones on \u00b7 tap a lamp on the plan or use the switches</div></div>'
+  +'<div style="display:flex;gap:22px;align-items:flex-start;flex-wrap:wrap;">'
+  // mimic panel \u2014 plan on light chart paper so the drawing reads naturally
+  +'<div class="card" style="flex:1.15;min-width:min(100%,280px);padding:16px;display:flex;justify-content:center;align-items:center;height:calc(100vh - 230px);min-height:320px;">'
+    +'<div style="position:relative;aspect-ratio:336/655;width:min(100%, calc((100vh - 262px) * 0.513));margin:0 auto;">'
+      +'<img src="uploads/L620MY Plan 655x336.png" style="width:100%;height:100%;object-fit:contain;display:block;'+(zOn>0?'':'filter:grayscale(0.6) opacity(0.75);')+'" onerror="this.style.display=\'none\'">'
+      +dots
+    +'</div>'
+  +'</div>'
+  // switch list with master controls
+  +'<div style="flex:1;display:flex;flex-direction:column;gap:10px;min-width:min(100%,280px);">'
+    +'<div style="display:flex;gap:10px;">'
+      +'<div onclick="setAllZones(true)" style="flex:1;height:42px;display:flex;align-items:center;justify-content:center;border-radius:8px;border:1px solid rgba(255,214,107,0.5);color:#ffd66b;font-size:12px;font-weight:700;letter-spacing:1.5px;cursor:pointer;background:rgba(255,214,107,0.07);">ALL ON</div>'
+      +'<div onclick="setAllZones(false)" style="flex:1;height:42px;display:flex;align-items:center;justify-content:center;border-radius:8px;border:1px solid #2a3844;color:#7d939e;font-size:12px;font-weight:700;letter-spacing:1.5px;cursor:pointer;">ALL OFF</div>'
+    +'</div>'
+  +ZONES.map(function(z){var on=S.zones[z[0]];
+    return '<div class="card" onclick="tgl(\'zones.'+z[0]+'\')" style="padding:12px 16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:14px;border-color:'+(on?'rgba(255,214,107,0.45)':'#1f2b34')+';'+(on?'background:linear-gradient(90deg,rgba(255,214,107,0.05),#131b22);':'')+'">'
+    +'<div style="display:flex;align-items:center;gap:12px;">'
+      +'<div style="width:10px;height:10px;border-radius:50%;background:'+(on?'#ffd66b':'#2a3844')+';'+(on?'box-shadow:0 0 10px 3px rgba(255,214,107,0.5);':'')+'"></div>'
+      +'<div><div style="font-size:13px;font-weight:700;letter-spacing:1px;color:'+(on?TXT:DIM)+';">'+z[1]+'</div>'
+      +'<div class="stlbl'+(on?' on':'')+'" style="margin-top:2px;color:'+(on?'#ffd66b':'#7d939e')+';">'+(on?'ON':'OFF')+'</div></div>'
+    +'</div>'+sw(on,'event.stopPropagation();tgl(\'zones.'+z[0]+'\')')+'</div>';}).join('')
+  +'</div></div>';
+},
+shades: function(){
+  var defs=[['port','PORT SIDE SHADE','Salon windows \u00b7 port'],['stbd','STBD SIDE SHADE','Salon windows \u00b7 starboard'],['front','FRONT SHADES','Windshield \u00b7 3 panels'],['aft','AFT SHADES','Cockpit doors \u00b7 2 panels']];
+  function card(d){
+    var k=d[0], pct=S.shades[k];
+    var status=pct===0?'OPEN':(pct===100?'CLOSED':pct+'% CLOSED');
+    var scol=pct===0?OK:(pct===100?'#9fb4be':'#2fc4d1');
+    function btn(label,target){
+      var active=pct===target;
+      return '<div onclick="setShade(&quot;'+k+'&quot;,'+target+')" style="flex:1;height:44px;display:flex;align-items:center;justify-content:center;border-radius:8px;font-size:12px;font-weight:700;letter-spacing:1.5px;cursor:pointer;'+(active?'background:rgba(47,196,209,0.15);border:1px solid #2fc4d1;color:#2fc4d1;':'border:1px solid #2a3844;color:#7d939e;')+'">'+label+'</div>';
+    }
+    var louvres='';
+    for(var i=0;i<8;i++){louvres+='<div style="flex:1;background:linear-gradient(180deg,#31414f,#1c2833 60%,#141d25);border-bottom:1px solid rgba(0,0,0,0.5);"></div>';}
+    return '<div class="card" style="padding:22px;display:flex;flex-direction:column;gap:16px;">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;">'
+        +'<div><div style="font-size:13px;font-weight:700;letter-spacing:2px;">'+d[1]+'</div><div style="font-size:12px;color:#7d939e;margin-top:3px;">'+d[2]+'</div></div>'
+        +'<div style="font-size:12px;font-weight:700;letter-spacing:1.5px;color:'+scol+';">'+status+'</div>'
+      +'</div>'
+      +'<div style="position:relative;height:120px;border-radius:10px;overflow:hidden;border:2px solid #2a3844;background:linear-gradient(180deg,#7db8d6 0%,#a8cfe2 55%,#4e7f9c 56%,#3a6076 100%);box-shadow:inset 0 2px 10px rgba(0,0,0,0.35);">'
+        +'<div style="position:absolute;left:0;right:0;top:0;height:'+pct+'%;display:flex;flex-direction:column;transition:height 2.2s cubic-bezier(.4,0,.3,1);box-shadow:0 3px 8px rgba(0,0,0,0.45);">'+louvres+'</div>'
+      +'</div>'
+      +'<div style="display:flex;gap:10px;">'+btn('OPEN',0)+btn('HALF',50)+btn('CLOSE',100)+'</div>'
+    +'</div>';
+  }
+  var closed=defs.filter(function(d){return S.shades[d[0]]===100;}).length;
+  return '<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:22px;"><h2 class="cond" style="margin:0;">SHADES</h2><div class="sub">'+closed+' of 4 fully closed</div></div>'
+  +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,380px),1fr));gap:18px;max-width:1000px;">'+defs.map(card).join('')+'</div>';
+},
+settings: function(){
+  function row(title,sub,control){
+    return '<div class="card" style="padding:18px 22px;display:flex;align-items:center;justify-content:space-between;gap:20px;">'
+      +'<div><div style="font-size:14px;font-weight:700;letter-spacing:1.5px;">'+title+'</div><div style="font-size:12px;color:#7d939e;margin-top:3px;">'+sub+'</div></div>'+control+'</div>';
+  }
+  function seg(key,options){
+    return '<div style="display:flex;gap:6px;">'+options.map(function(o){
+      var on=S[key]===o;
+      return '<div onclick="setOpt(&quot;'+key+'&quot;,&quot;'+o+'&quot;)" style="min-width:64px;height:40px;padding:0 14px;display:flex;align-items:center;justify-content:center;border-radius:8px;font-size:12px;font-weight:700;letter-spacing:1px;cursor:pointer;'+(on?'background:rgba(47,196,209,0.15);border:1px solid #2fc4d1;color:#2fc4d1;':'border:1px solid #2a3844;color:#7d939e;')+'">'+o+'</div>';
+    }).join('')+'</div>';
+  }
+  var dimCtl='<div style="display:flex;align-items:center;gap:14px;"><input type="range" min="20" max="100" value="'+S.dim+'" oninput="setDim(this.value)" style="width:180px;accent-color:#2fc4d1;"><span class="cond" style="font-size:20px;font-weight:600;min-width:52px;text-align:right;">'+S.dim+'%</span></div>';
+  return '<h2 class="cond">SETTINGS</h2>'
+  +'<div style="display:flex;flex-direction:column;gap:12px;max-width:820px;">'
+  +'<div style="font-size:12px;font-weight:700;letter-spacing:2px;color:#7d939e;margin-top:4px;">DISPLAY</div>'
+  +row('NIGHT MODE','Red-shifted dim display for night watch',sw(S.night,"tgl('night')"))
+  +row('BRIGHTNESS','Panel backlight level',dimCtl)
+  +'<div style="font-size:12px;font-weight:700;letter-spacing:2px;color:#7d939e;margin-top:10px;">PREFERENCES</div>'
+  +row('LANGUAGE','Interface language',seg('lang',['EN','FR']))
+  +row('TANK UNITS','Volumes shown as litres or US gallons',seg('units',['L','GAL']))
+  +'<div style="font-size:12px;font-weight:700;letter-spacing:2px;color:#7d939e;margin-top:10px;">ALARMS</div>'
+  +row('SERVICE BATTERY ALARM','Simulated fault on the 24V service bank (demo)',sw(S.alarm,"tgl('alarm')"))
+  +row('ALARM TEST','Sound and display test of all alarm indicators','<div onclick="alarmTest()" style="height:44px;padding:0 22px;display:flex;align-items:center;border-radius:8px;border:1px solid #ffb648;color:#ffb648;font-size:12px;font-weight:700;letter-spacing:1.5px;cursor:pointer;">RUN TEST</div>')
+  +'<div style="font-size:12px;font-weight:700;letter-spacing:2px;color:#7d939e;margin-top:10px;">ABOUT</div>'
+  +'<div class="card" style="padding:18px 22px;display:grid;grid-template-columns:1fr 1fr;gap:10px 24px;font-size:13px;color:#9fb4be;">'
+    +'<div>Vessel<div style="color:#e8f0f2;font-weight:600;margin-top:2px;">Lagoon 630 Motor Yacht</div></div>'
+    +'<div>System<div style="color:#e8f0f2;font-weight:600;margin-top:2px;">Scheiber E-Plex \u00b7 Clock 400CCM</div></div>'
+    +'<div>Software<div style="color:#e8f0f2;font-weight:600;margin-top:2px;">v2.0 \u00b7 iPad</div></div>'
+    +'<div>Nodes online<div style="color:#e8f0f2;font-weight:600;margin-top:2px;">'+(S.alarm?'18 / 19':'19 / 19')+'</div></div>'
+  +'</div>'
+  +'</div>';
+},
+electronics: function(){
+  var on=S.electronics;
+  var devs=['CHARTPLOTTER','AUTOPILOT','VHF / AIS','RADAR'];
+  return '<h2 class="cond">ELECTRONICS</h2>'
+  +'<div class="card" style="padding:28px;display:flex;align-items:center;justify-content:space-between;gap:20px;">'
+  +'<div><div style="font-size:16px;font-weight:700;letter-spacing:1.5px;">ONBOARD ELECTRONICS</div><div style="font-size:14px;color:#7d939e;margin-top:6px;">Master supply for the navigation electronics bus</div></div>'
+  +swBlock(on,"tgl('electronics')")+'</div>'
+  +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px;margin-top:18px;">'
+  +devs.map(function(d){return '<div class="card" style="padding:18px;border-radius:12px;"><div style="font-size:13px;font-weight:700;letter-spacing:1.5px;">'+d+'</div><div style="display:flex;align-items:center;gap:8px;margin-top:10px;"><span class="dot" style="background:'+(on?OK:'#2a3844')+';"></span><span style="font-size:12px;font-weight:600;letter-spacing:1px;color:'+(on?OK:DIM)+';">'+(on?'POWERED':'OFF')+'</span></div></div>';}).join('')
+  +'</div>';
+},
+automation: function(){
+  var TRIGS={time:'Time is after',batt:'Service battery below',tank:'Fresh water below',shore:'Shore power disconnects'};
+  var ACTS={lightsOff:'Turn all lights off',lightsOn:'Turn all lights on',shadesClose:'Close all shades',shadesOpen:'Open all shades',anchorOn:'Turn anchor light on',alert:'Show alert on display'};
+  function trigLabel(r){
+    if(r.trig==='time')return TRIGS.time+' '+r.tv;
+    if(r.trig==='batt')return TRIGS.batt+' '+r.tv+'%';
+    if(r.trig==='tank')return TRIGS.tank+' '+r.tv+'%';
+    return TRIGS.shore;
+  }
+  var selStyle='height:44px;padding:0 12px;border-radius:8px;background:#0d151b;border:1px solid #2a3844;color:#e8f0f2;font-size:13px;font-weight:600;';
+  function opts(map,cur){var s='';for(var k in map){s+='<option value="'+k+'"'+(cur===k?' selected':'')+'>'+map[k]+'</option>';}return s;}
+  var nb=S.nb;
+  var valInput='';
+  if(nb.trig==='time'){valInput='<input type="time" value="'+(nb.tv.indexOf(':')>0?nb.tv:'23:00')+'" onchange="nbSet(&quot;tv&quot;,this.value)" style="'+selStyle+'width:120px;">';}
+  else if(nb.trig==='batt'||nb.trig==='tank'){valInput='<div style="display:flex;align-items:center;gap:8px;"><input type="number" min="5" max="95" step="5" value="'+(isNaN(parseInt(nb.tv))?30:parseInt(nb.tv))+'" onchange="nbSet(&quot;tv&quot;,this.value)" style="'+selStyle+'width:80px;"><span style="color:#7d939e;font-size:13px;font-weight:600;">%</span></div>';}
+  var rules=S.autos.map(function(r,i){
+    return '<div class="card" style="padding:16px 20px;display:flex;align-items:center;gap:16px;'+(r.on?'':'opacity:0.55;')+'">'
+      +'<div style="width:38px;height:38px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:rgba(47,196,209,0.1);border:1px solid rgba(47,196,209,0.3);color:#2fc4d1;font-size:16px;font-weight:700;">'+(i+1)+'</div>'
+      +'<div style="flex:1;min-width:0;">'
+        +'<div style="font-size:14px;font-weight:600;color:#e8f0f2;"><span style="color:#7d939e;font-weight:700;font-size:11px;letter-spacing:1.5px;">IF </span>'+trigLabel(r)+'</div>'
+        +'<div style="font-size:14px;font-weight:600;color:#e8f0f2;margin-top:3px;"><span style="color:#2fc4d1;font-weight:700;font-size:11px;letter-spacing:1.5px;">THEN </span>'+ACTS[r.act]+'</div>'
+      +'</div>'
+      +'<div onclick="delAuto('+i+')" style="width:38px;height:38px;border-radius:8px;display:flex;align-items:center;justify-content:center;border:1px solid #2a3844;color:#7d939e;cursor:pointer;font-size:16px;" title="Delete rule">\u2715</div>'
+      +sw(r.on,'tglAuto('+i+')')
+    +'</div>';
+  }).join('');
+  if(!S.autos.length){rules='<div class="card" style="padding:28px;text-align:center;color:#7d939e;font-size:14px;">No automations yet \u2014 create one below.</div>';}
+  return '<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:22px;"><h2 class="cond" style="margin:0;">AUTOMATION</h2><div class="sub">'+S.autos.filter(function(r){return r.on;}).length+' active rules</div></div>'
+  +'<div style="display:flex;flex-direction:column;gap:12px;max-width:860px;">'+rules
+  // builder
+  +'<div style="font-size:12px;font-weight:700;letter-spacing:2px;color:#7d939e;margin-top:14px;">NEW RULE</div>'
+  +'<div class="card" style="padding:20px 22px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-color:rgba(47,196,209,0.3);">'
+    +'<span style="font-size:12px;font-weight:700;letter-spacing:2px;color:#7d939e;">IF</span>'
+    +'<select onchange="nbSet(&quot;trig&quot;,this.value)" style="'+selStyle+'">'+opts(TRIGS,nb.trig)+'</select>'
+    +valInput
+    +'<span style="font-size:12px;font-weight:700;letter-spacing:2px;color:#2fc4d1;">THEN</span>'
+    +'<select onchange="nbSet(&quot;act&quot;,this.value)" style="'+selStyle+'">'+opts(ACTS,nb.act)+'</select>'
+    +'<div onclick="addAuto()" style="height:44px;padding:0 24px;display:flex;align-items:center;border-radius:8px;background:#2fc4d1;color:#0a1014;font-size:13px;font-weight:700;letter-spacing:1.5px;cursor:pointer;">ADD RULE</div>'
+  +'</div>'
+  +'<div style="font-size:12px;color:#5d7280;line-height:1.5;">Rules run on the E-Plex clock module. Example: IF time is after 23:00 THEN turn all lights off.</div>'
+  +'</div>';
+},
+engines: function(){
+  var E=LIVE.engines;
+  function bar(pct,col){pct=Math.max(0,Math.min(100,pct));return '<div style="height:8px;border-radius:4px;background:#0d151b;overflow:hidden;"><div style="height:100%;width:'+pct+'%;background:'+col+';border-radius:4px;transition:width .6s;"></div></div>';}
+  function tempCol(t){return t>=95?BAD:(t>=88?WARN:OK);}
+  function stat(l,v,c){return '<div style="background:#0d151b;border-radius:10px;padding:12px 14px;"><div style="font-size:10px;font-weight:700;letter-spacing:1.5px;color:#7d939e;">'+l+'</div><div class="cond" style="font-size:22px;font-weight:600;margin-top:4px;color:'+c+';">'+v+'</div></div>';}
+  function card(e){
+    var running=e.rpm>0, loadPct=Math.round(e.rpm/3200*100);
+    return '<div class="card" style="padding:24px;display:flex;flex-direction:column;gap:18px;">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;">'
+        +'<div style="font-size:14px;font-weight:700;letter-spacing:2px;">'+e.name+'</div>'
+        +'<div style="font-size:11px;font-weight:700;letter-spacing:1.5px;padding:5px 10px;border-radius:6px;background:'+(running?'rgba(53,208,127,0.12)':'rgba(125,147,158,0.12)')+';color:'+(running?OK:DIM)+';">'+(running?'RUNNING':'OFF')+'</div>'
+      +'</div>'
+      +'<div style="display:flex;align-items:baseline;gap:12px;"><div class="cond" style="font-size:64px;font-weight:600;line-height:0.85;color:'+(running?TXT:DIM)+';">'+e.rpm+'</div><div class="sub">RPM</div></div>'
+      +'<div><div style="display:flex;justify-content:space-between;font-size:11px;color:#7d939e;letter-spacing:1px;margin-bottom:6px;"><span>LOAD</span><span>'+loadPct+'%</span></div>'+bar(loadPct,ACC)+'</div>'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">'
+        +stat('COOLANT',e.temp+' °C',tempCol(e.temp))
+        +stat('OIL PRESSURE',e.oil+' bar',e.oil<2?BAD:OK)
+        +stat('ENGINE HOURS',e.hours+' h',TXT)
+        +stat('FUEL RATE',e.fuel+' L/h',TXT)
+      +'</div></div>';
+  }
+  var running=(E.port.rpm>0?1:0)+(E.stbd.rpm>0?1:0);
+  return '<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:22px;"><h2 class="cond" style="margin:0;">MAIN ENGINES</h2><div class="sub">Twin diesel · '+running+' of 2 running</div></div>'
+  +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:18px;">'+card(E.port)+card(E.stbd)+'</div>'
+  +'<div class="card" style="margin-top:18px;padding:18px 22px;display:flex;align-items:center;gap:34px;flex-wrap:wrap;">'
+    +'<div><div class="label">SEA WATER TEMP</div><div class="cond" style="font-size:22px;font-weight:600;margin-top:4px;">'+E.seaTemp+' °C</div></div>'
+    +'<div><div class="label">ENGINE ROOM</div><div class="cond" style="font-size:22px;font-weight:600;margin-top:4px;">'+E.roomTemp+' °C</div></div>'
+    +'<div><div class="label">RACOR FILTERS</div><div class="cond" style="font-size:22px;font-weight:600;margin-top:4px;color:'+OK+';">OK</div></div>'
+    +'<div style="flex:1;min-width:20px;"></div>'
+    +'<div style="font-size:12px;color:#7d939e;max-width:300px;line-height:1.5;">Engine telemetry via the NMEA 2000 gateway. Read-only — start and stop at the helm.</div>'
+  +'</div>';
+},
+av: function(){
+  var a=S.av, amp=a.amp, tv=a.tv;
+  var moving=tv==='moving';
+  var tvStatus=moving?'MOVING…':(tv==='up'?'RAISED':'LOWERED');
+  var tvCol=moving?WARN:(tv==='up'?OK:'#9fb4be');
+  var liftPct=moving?55:(tv==='up'?100:0);
+  function bigBtn(label,action,active,accent){
+    return '<div onclick="'+action+'" style="flex:1;height:64px;display:flex;align-items:center;justify-content:center;gap:8px;border-radius:10px;font-size:15px;font-weight:700;letter-spacing:1.5px;cursor:pointer;'
+      +(active?'background:rgba(47,196,209,0.15);border:1px solid #2fc4d1;color:#2fc4d1;':'border:1px solid #2a3844;color:'+(accent||'#9fb4be')+';')+'">'+label+'</div>';
+  }
+  // TV LIFT card
+  var lift='<div class="card" style="padding:24px;display:flex;flex-direction:column;gap:18px;">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;"><div style="font-size:14px;font-weight:700;letter-spacing:2px;">SALON TV LIFT</div>'
+      +'<div style="font-size:12px;font-weight:700;letter-spacing:1.5px;color:'+tvCol+';">'+tvStatus+'</div></div>'
+    +'<div style="display:flex;gap:20px;align-items:stretch;">'
+      // lift visual
+      +'<div style="width:120px;flex-shrink:0;position:relative;border-radius:12px;background:linear-gradient(180deg,#0d151b,#131b22);border:1px solid #1f2b34;overflow:hidden;min-height:190px;">'
+        +'<div style="position:absolute;left:50%;top:8%;transform:translateX(-50%);width:8px;bottom:8%;background:repeating-linear-gradient(180deg,#243240 0 6px,transparent 6px 12px);"></div>'
+        +'<div style="position:absolute;left:16px;right:16px;bottom:calc(10% + '+(liftPct*0.66)+'%);height:52px;border-radius:6px;background:linear-gradient(180deg,#1c2833,#0a0f14);border:1px solid #34505f;box-shadow:0 6px 14px rgba(0,0,0,0.5);transition:bottom 1.4s cubic-bezier(.4,0,.3,1);display:flex;align-items:center;justify-content:center;"><div style="font-size:9px;letter-spacing:2px;color:#5d7280;">TV</div></div>'
+        +'<div style="position:absolute;left:8px;right:8px;bottom:6%;height:10px;border-radius:3px;background:#1c2833;border:1px solid #26343f;"></div>'
+      +'</div>'
+      // controls
+      +'<div style="flex:1;display:flex;flex-direction:column;gap:12px;justify-content:center;">'
+        +bigBtn('▲ RAISE','setTv(\'up\')',tv==='up')
+        +bigBtn('■ STOP','setTv(\'stop\')',false,WARN)
+        +bigBtn('▼ LOWER','setTv(\'down\')',tv==='down')
+      +'</div>'
+    +'</div></div>';
+  // AMPLIFIER card
+  var srcs=['HDMI 1','APPLE TV','BLUETOOTH','FM RADIO','AUX'];
+  var amps='<div class="card" style="padding:24px;display:flex;flex-direction:column;gap:18px;'+(amp.on?'':'opacity:0.6;')+'">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;"><div style="font-size:14px;font-weight:700;letter-spacing:2px;">AMPLIFIER</div>'+swBlock(amp.on,'ampToggle()')+'</div>'
+    +'<div style="display:flex;align-items:baseline;gap:10px;"><div class="cond" style="font-size:56px;font-weight:600;line-height:0.85;color:'+(amp.mute?BAD:TXT)+';">'+(amp.mute?'MUTE':amp.vol)+'</div>'+(amp.mute?'':'<div class="sub">volume</div>')+'</div>'
+    +'<input type="range" min="0" max="100" value="'+amp.vol+'" oninput="ampVol(this.value)" '+(amp.on?'':'disabled')+' style="width:100%;accent-color:#2fc4d1;">'
+    +'<div style="display:flex;gap:10px;">'
+      +'<div onclick="ampMute()" style="flex:1;height:44px;display:flex;align-items:center;justify-content:center;border-radius:8px;font-size:12px;font-weight:700;letter-spacing:1.5px;cursor:pointer;'+(amp.mute?'background:rgba(255,77,79,0.15);border:1px solid #ff4d4f;color:#ff8082;':'border:1px solid #2a3844;color:#9fb4be;')+'">'+(amp.mute?'UNMUTE':'MUTE')+'</div>'
+    +'</div>'
+    +'<div><div class="label" style="margin-bottom:10px;">SOURCE</div><div style="display:flex;flex-wrap:wrap;gap:8px;">'
+      +srcs.map(function(s){var on=amp.src===s;return '<div onclick="ampSrc(\''+s+'\')" style="height:38px;padding:0 14px;display:flex;align-items:center;border-radius:8px;font-size:12px;font-weight:700;letter-spacing:1px;cursor:pointer;'+(on?'background:rgba(47,196,209,0.15);border:1px solid #2fc4d1;color:#2fc4d1;':'border:1px solid #2a3844;color:#7d939e;')+'">'+s+'</div>';}).join('')
+    +'</div></div></div>';
+  // REMOTE card
+  function rk(label,key,style){return '<div onclick="avRemote(\''+key+'\')" style="height:52px;display:flex;align-items:center;justify-content:center;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;user-select:none;border:1px solid #2a3844;color:#cddbe2;background:#0d151b;'+(style||'')+'">'+label+'</div>';}
+  var remote='<div class="card" style="padding:24px;display:flex;flex-direction:column;gap:14px;max-width:300px;">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;"><div style="font-size:14px;font-weight:700;letter-spacing:2px;">TV REMOTE</div><div style="font-size:11px;color:#7d939e;letter-spacing:1px;">'+amp.src+'</div></div>'
+    +'<div style="display:flex;gap:10px;">'+rk('PWR','power','flex:1;border-color:#3a2a2c;color:#ff8082;')+rk('SRC','source','flex:1;')+rk('MENU','menu','flex:1;')+'</div>'
+    // d-pad
+    +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:4px;">'
+      +'<div></div>'+rk('▲','up')+'<div></div>'
+      +rk('◀','left')+rk('OK','ok','background:#2fc4d1;color:#0a1014;border-color:#2fc4d1;')+rk('▶','right')
+      +'<div></div>'+rk('▼','down')+'<div></div>'
+    +'</div>'
+    // vol / ch
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:4px;">'
+      +'<div style="display:flex;flex-direction:column;gap:8px;">'+rk('VOL +','vol_up')+'<div style="text-align:center;font-size:10px;letter-spacing:2px;color:#7d939e;">VOLUME</div>'+rk('VOL −','vol_down')+'</div>'
+      +'<div style="display:flex;flex-direction:column;gap:8px;">'+rk('CH +','ch_up')+'<div style="text-align:center;font-size:10px;letter-spacing:2px;color:#7d939e;">CHANNEL</div>'+rk('CH −','ch_down')+'</div>'
+    +'</div>'
+    +'<div style="display:flex;gap:10px;">'+rk('⏮','prev','flex:1;')+rk('⏯','play','flex:1;')+rk('⏭','next','flex:1;')+rk('🔇','mute','flex:1;')+'</div>'
+  +'</div>';
+  return '<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:22px;"><h2 class="cond" style="margin:0;">AV / MEDIA</h2><div class="sub">Salon TV lift · amplifier · remote</div></div>'
+    +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px;align-items:start;">'+lift+amps+remote+'</div>';
+},
+system: function(){
+  var rows=[['Bus link','LINKED',OK,OK],['Service battery monitor',S.alarm?'FAULT':'OK',S.alarm?BAD:OK,S.alarm?BAD:OK],['Last synchronization','2 s ago',OK,TXT],['Uptime','11 d 4 h',OK,TXT]];
+  function m(name,ref,addr,fault){return {n:name,r:ref,a:addr,f:fault||false};}
+  var groups=[
+    ['BUS 1 · AMMETRIC SENSORS','#3db9ff',[m('GE battery sensor','BMI','34'),m('Main battery sensor','BMI','74',S.alarm)]],
+    ['BUS 2 · STARBOARD HULL','#a86fe0',[m('Water tank module STBD','319RSM','194'),m('Fuel tank sensor STBD','319RSM','234'),m('Fuel transfer relay','149CT30','11'),m('Engine battery sensor STBD','BMI','14')]],
+    ['BUS 3 · DC OUTPUTS','#ff5b5d',[m('6-output DC module','366HMM','94'),m('10-output DC module','436MMX','112'),m('Pilot computer','—','10'),m('E-Plex relay','149CT30','329')]],
+    ['BUS 3 BIS · GATEWAYS','#ff5b5d',[m('E-Plex WiFi module + iTach','—','244'),m('CAN interface','427CANI','494'),m('Scheiber CAN gateway','—','—')]],
+    ['BUS 4 · PORT HULL','#3fd465',[m('Water tank module PORT','319RSM','183'),m('Fuel tank sensor PORT','319RSM','224'),m('Engine battery sensor PORT','BMI','54')]],
+    ['DISPLAY LINKS','#e254b6',[m('Clock module','400CCM','—'),m('Chart-table touchscreen','RS232 DB9','—'),m('WiFi gateway (iPad)','USB','—')]]
+  ];
+  return '<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:22px;"><h2 class="cond" style="margin:0;">SYSTEM STATUS</h2><div class="sub">E-Plex network · Clock module 400CCM · '+(S.alarm?'18 / 19':'19 / 19')+' nodes online</div></div>'
+  +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px;margin-bottom:20px;">'
+  +rows.map(function(r){return '<div class="card" style="padding:16px 22px;border-radius:12px;display:flex;align-items:center;justify-content:space-between;"><div style="font-size:14px;font-weight:600;color:#9fb4be;">'+r[0]+'</div><div style="display:flex;align-items:center;gap:10px;"><span class="dot" style="background:'+r[2]+';"></span><span style="font-size:14px;font-weight:700;color:'+r[3]+';">'+r[1]+'</span></div></div>';}).join('')
+  +'</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px;">'
+  +groups.map(function(g){return '<div class="card" style="padding:20px 22px;"><div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;"><div style="width:12px;height:12px;border-radius:3px;background:'+g[1]+';"></div><div style="font-size:13px;font-weight:700;letter-spacing:2px;">'+g[0]+'</div><div style="flex:1;"></div><div style="font-size:12px;color:#7d939e;">'+g[2].length+' modules</div></div>'
+    +'<div style="display:flex;flex-direction:column;gap:8px;">'
+    +g[2].map(function(x){return '<div style="display:flex;align-items:center;gap:12px;padding:8px 12px;border-radius:8px;background:#0d151b;"><span class="dot" style="width:7px;height:7px;background:'+(x.f?BAD:OK)+';flex-shrink:0;"></span><div style="font-size:13px;font-weight:600;flex:1;color:'+(x.f?BAD:TXT)+';">'+x.n+'</div><div style="font-size:12px;color:#7d939e;">'+x.r+'</div><div class="cond" style="font-size:14px;font-weight:600;color:#9fb4be;min-width:64px;text-align:right;">ADDR '+x.a+'</div></div>';}).join('')
+    +'</div></div>';}).join('')
+  +'</div>';
+}
+};
+
+var ICONS={
+home:'<path d="M3 11 L12 3 L21 11 M6 10 V20 H18 V10"/>',
+ac:'<path d="M13 2 L5 13 H11 L9 22 L19 9 H13 Z"/>',
+batteries:'<rect x="3" y="8" width="16" height="10" rx="2"/><path d="M21 11 V15 M6 11 V15 M9.5 11 V15"/>',
+tanks:'<path d="M12 3 C12 3 5 11 5 15.5 A7 7 0 0 0 19 15.5 C19 11 12 3 12 3 Z"/>',
+nav:'<circle cx="12" cy="12" r="9"/><path d="M15.5 8.5 L13.5 13.5 L8.5 15.5 L10.5 10.5 Z"/>',
+lighting:'<path d="M9 18 H15 M10 21 H14 M12 3 A6 6 0 0 1 15 14 H9 A6 6 0 0 1 12 3 Z"/>',
+shades:'<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 8 H20 M4 12 H20 M12 12 V16"/>',
+electronics:'<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2 V6 M15 2 V6 M9 18 V22 M15 18 V22 M2 9 H6 M2 15 H6 M18 9 H22 M18 15 H22"/>',
+automation:'<circle cx="12" cy="12" r="9"/><path d="M12 7 V12 L15.5 14"/>',
+system:'<circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M12 7.5 L5.8 16.8 M12 7.5 L18.2 16.8 M7.5 19 H16.5"/>',
+settings:'<circle cx="12" cy="12" r="3.2"/><path d="M12 2.5 V6 M12 18 V21.5 M2.5 12 H6 M18 12 H21.5 M5.3 5.3 L7.8 7.8 M16.2 16.2 L18.7 18.7 M18.7 5.3 L16.2 7.8 M7.8 16.2 L5.3 18.7"/>'
+};
+function navIcon(id,color){return '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="'+color+'" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="filter:drop-shadow(0 2px 2px rgba(0,0,0,0.6));">'+(ICONS[id]||'')+'</svg>';}
+function render(){
+  document.getElementById('rail').innerHTML = NAV.map(function(n){
+    var on=S.screen===n[0];
+    var color=on?'#2fc4d1':'#7d939e';
+    var isAlarm=(n[0]==='batteries'&&S.alarm);
+    return '<div class="navitem'+(on?' on':'')+(isAlarm?' alarm':'')+'" onclick="go(&quot;'+n[0]+'&quot;)" style="position:relative;flex-direction:column;justify-content:center;gap:5px;height:62px;border-left:none;">'
+      +(on?'<div style="position:absolute;left:6px;top:12px;bottom:12px;width:3px;border-radius:3px;background:linear-gradient(180deg,#7de3ec,#2fc4d1);box-shadow:0 0 10px rgba(47,196,209,0.8);"></div>':'')
+      +navIcon(n[0],color)
+      +'<div style="font-size:9.5px;font-weight:700;letter-spacing:1.2px;color:'+color+';text-shadow:0 1px 2px rgba(0,0,0,0.7);">'+n[1]+'</div>'
+    +'</div>';
+  }).join('') + '<div style="flex:1;"></div><div style="padding:14px;text-align:center;font-size:10px;letter-spacing:1px;color:#4a5b66;">v2.0</div>';
+  document.getElementById('main').innerHTML = SCREENS[S.screen]();
+  document.getElementById('alarmChip').style.display = (S.alarm||S._testing) ? 'flex' : 'none';
+  var app=document.getElementById('app');
+  app.style.filter='brightness('+(0.4+S.dim/100*0.6)+')';
+  var ov=document.getElementById('nightOv');
+  if(S.night&&!ov){ov=document.createElement('div');ov.id='nightOv';ov.style.cssText='position:fixed;inset:0;pointer-events:none;background:rgba(140,20,20,0.25);mix-blend-mode:multiply;z-index:99;';document.body.appendChild(ov);}
+  if(!S.night&&ov){ov.remove();}
+}
+function clock(){var d=new Date();document.getElementById('clock').textContent=('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);}
+try{var savedLP=JSON.parse(localStorage.getItem('vm_lightPos')||'null');if(savedLP)S.lightPos=Object.assign({},S.lightPos,savedLP);}catch(e){}
+try{var savedAU=JSON.parse(localStorage.getItem('vm_autos')||'null');if(savedAU)S.autos=savedAU;}catch(e){}
+function nbSet(k,v){S.nb[k]=v;if(k==='trig'){S.nb.tv=v==='time'?'23:00':'30';render();}}
+function addAuto(){S.autos.push({trig:S.nb.trig,tv:S.nb.tv,act:S.nb.act,on:true});saveAutos();render();}
+function delAuto(i){S.autos.splice(i,1);saveAutos();render();}
+function tglAuto(i){S.autos[i].on=!S.autos[i].on;saveAutos();render();}
+function saveAutos(){try{localStorage.setItem('vm_autos',JSON.stringify(S.autos));}catch(e){}}
+function setShade(k,target){S.shades[k]=target;render();}
+/* AV / MEDIA controls. avSend() posts to the C# host (safe/no-op when standalone),
+   ready to wire to IR / amplifier hardware later. */
+function avSend(action){try{if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage({cmd:'av',action:action});}catch(e){}}
+function setTv(dir){
+  avSend('tv_'+dir);
+  if(dir==='stop'){ if(S.av.tv==='moving')S.av.tv='down'; render(); return; }
+  S.av.tv='moving'; render();
+  setTimeout(function(){ S.av.tv=dir; render(); }, 1600);
+}
+function ampToggle(){S.av.amp.on=!S.av.amp.on;avSend('amp_power');render();}
+function ampVol(v){S.av.amp.vol=parseInt(v,10);S.av.amp.mute=false;avSend('amp_vol_'+v);render();}
+function ampSrc(s){S.av.amp.src=s;avSend('amp_src');render();}
+function ampMute(){S.av.amp.mute=!S.av.amp.mute;avSend('amp_mute');render();}
+function avRemote(key){
+  if(key==='mute'){ampMute();return;}
+  if(key==='vol_up'){S.av.amp.vol=Math.min(100,S.av.amp.vol+2);S.av.amp.mute=false;}
+  if(key==='vol_down'){S.av.amp.vol=Math.max(0,S.av.amp.vol-2);}
+  if(key==='power'){S.av.amp.on=!S.av.amp.on;}
+  avSend('remote_'+key);
+  render();
+}
+function setOpt(k,v){S[k]=v;render();}
+function setDim(v){S.dim=parseInt(v,10);var m=document.getElementById('app');if(m)m.style.filter='brightness('+(0.4+S.dim/100*0.6)+')';var lbl=event&&event.target&&event.target.nextElementSibling;if(lbl)lbl.textContent=S.dim+'%';}
+function alarmTest(){var chip=document.getElementById('alarmChip');S._testing=true;render();chip=document.getElementById('alarmChip');if(chip){chip.style.display='flex';}setTimeout(function(){S._testing=false;render();},3000);}
+function setAllZones(v){ZONES.forEach(function(z){S.zones[z[0]]=v;});render();}
+function dragLight(ev,key){
+  ev.preventDefault();
+  var el=ev.currentTarget, cv=document.getElementById('lightCanvas');
+  if(!cv) return;
+  el.setPointerCapture(ev.pointerId);
+  el.style.cursor='grabbing';
+  function move(e){
+    var r=cv.getBoundingClientRect();
+    var x=Math.min(100,Math.max(0,(e.clientX-r.left)/r.width*100));
+    var y=Math.min(100,Math.max(0,(e.clientY-r.top)/r.height*100));
+    S.lightPos[key]=[Math.round(x*10)/10,Math.round(y*10)/10];
+    el.style.left=S.lightPos[key][0]+'%';
+    el.style.top=S.lightPos[key][1]+'%';
+  }
+  function up(e){
+    el.releasePointerCapture(ev.pointerId);
+    el.style.cursor='grab';
+    el.removeEventListener('pointermove',move);
+    el.removeEventListener('pointerup',up);
+    try{localStorage.setItem('vm_lightPos',JSON.stringify(S.lightPos));}catch(err){}
+  }
+  el.addEventListener('pointermove',move);
+  el.addEventListener('pointerup',up);
+}
+clock();setInterval(clock,15000);
+render();
+</script>
+
+
+</body></html>

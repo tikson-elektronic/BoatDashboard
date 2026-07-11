@@ -44,7 +44,8 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <StackPanel Grid.Row="0">
+            <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" Padding="0,0,10,0">
+                <StackPanel>
                 <TextBlock Text="Settings" Foreground="{StaticResource TextBrush}" FontSize="22" FontWeight="Bold"/>
 
                 <TextBlock Text="CLAUDE AI" Style="{StaticResource SectionTitle}" Margin="0,18,0,2"/>
@@ -53,42 +54,55 @@
                 <TextBlock Text="Stored locally in %AppData%\BoatDashboard. Used for the onboard assistant."
                            Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="2,4,0,0" TextWrapping="Wrap"/>
 
-                <TextBlock Text="MQTT PUBLISHING" Style="{StaticResource SectionTitle}" Margin="0,20,0,2"/>
-                <CheckBox x:Name="MqttEnabled" Content="Publish all telemetry to MQTT"
-                          Foreground="{StaticResource TextBrush}" Margin="2,6,0,0"/>
-                <Grid Margin="0,4,0,0">
+                <TextBlock Text="VESSEL PAIRING (ALIVE CLOUD)" Style="{StaticResource SectionTitle}" Margin="0,20,0,2"/>
+                <TextBlock x:Name="PairStatusText" Text="Not paired"
+                           Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="2,4,0,0" TextWrapping="Wrap"/>
+                <TextBlock Text="Pairing code" Style="{StaticResource Lbl}"/>
+                <Grid Margin="0,0,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="12"/>
                         <ColumnDefinition Width="120"/>
                     </Grid.ColumnDefinitions>
-                    <StackPanel Grid.Column="0">
-                        <TextBlock Text="Broker host" Style="{StaticResource Lbl}"/>
-                        <TextBox x:Name="MqttHost"/>
-                    </StackPanel>
-                    <StackPanel Grid.Column="2">
-                        <TextBlock Text="Port" Style="{StaticResource Lbl}"/>
-                        <TextBox x:Name="MqttPort"/>
-                    </StackPanel>
+                    <TextBox x:Name="PairCodeBox" Grid.Column="0" CharacterCasing="Upper" MaxLength="12"
+                             FontFamily="Consolas" FontSize="18"/>
+                    <Button x:Name="PairButton" Grid.Column="2" Content="Pair" Height="38" VerticalAlignment="Bottom"
+                            Style="{StaticResource SceneOn}" Click="Pair_Click"/>
                 </Grid>
-                <Grid Margin="0,0,0,0">
+                <TextBlock x:Name="PairMsgText" Text="" Visibility="Collapsed"
+                           FontSize="11" Margin="2,6,0,0" TextWrapping="Wrap"/>
+                <Button x:Name="UnpairButton" Content="Unpair this PC" HorizontalAlignment="Left"
+                        Height="32" Margin="0,8,0,0" Visibility="Collapsed"
+                        Style="{StaticResource LightButton}" Click="Unpair_Click"/>
+                <TextBlock x:Name="HardwareIdText" Text="" Foreground="{StaticResource MutedBrush}"
+                           FontSize="10" Margin="2,8,0,0" TextWrapping="Wrap"/>
+
+                <TextBlock Text="KIOSK / DISPLAY" Style="{StaticResource SectionTitle}" Margin="0,20,0,2"/>
+                <CheckBox x:Name="KioskCheck" Content="Kiosk mode — fullscreen, hide cursor, always on top, locked"
+                          Foreground="{StaticResource TextBrush}" FontSize="13" Margin="2,10,0,0"/>
+                <CheckBox x:Name="BootCheck" Content="Launch automatically at Windows startup"
+                          Foreground="{StaticResource TextBrush}" FontSize="13" Margin="2,10,0,0"/>
+                <TextBlock Text="In kiosk mode the window has no chrome or cursor and stays on top. The only way to exit is the passcode below."
+                           Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="2,8,0,0" TextWrapping="Wrap"/>
+
+                <TextBlock Text="SHUT DOWN" Style="{StaticResource SectionTitle}" Margin="0,20,0,2"/>
+                <TextBlock Text="Enter the passcode to close the dashboard."
+                           Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="2,4,0,0" TextWrapping="Wrap"/>
+                <Grid Margin="0,4,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="12"/>
-                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="140"/>
                     </Grid.ColumnDefinitions>
                     <StackPanel Grid.Column="0">
-                        <TextBlock Text="Username (optional)" Style="{StaticResource Lbl}"/>
-                        <TextBox x:Name="MqttUser"/>
+                        <TextBlock Text="Passcode" Style="{StaticResource Lbl}"/>
+                        <PasswordBox x:Name="KillPass"/>
                     </StackPanel>
-                    <StackPanel Grid.Column="2">
-                        <TextBlock Text="Password (optional)" Style="{StaticResource Lbl}"/>
-                        <PasswordBox x:Name="MqttPass"/>
-                    </StackPanel>
+                    <Button Grid.Column="2" Content="Shut Down" Height="34" VerticalAlignment="Bottom"
+                            Style="{StaticResource LightButton}" Click="Kill_Click"/>
                 </Grid>
-                <TextBlock Text="Base topic" Style="{StaticResource Lbl}"/>
-                <TextBox x:Name="MqttTopic"/>
-            </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
 
             <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
                 <Button Content="Cancel" Width="100" Height="40" Margin="0,0,10,0"

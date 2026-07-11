@@ -17,6 +17,12 @@ public sealed class AppSettings
 {
     public string ClaudeApiKey { get; set; } = "";
     public MqttSettings Mqtt { get; set; } = new();
+
+    /// <summary>Fullscreen, cursor-hidden, always-on-top, close-locked kiosk display.</summary>
+    public bool Kiosk { get; set; } = false;
+
+    /// <summary>Register the app to start automatically at Windows sign-in.</summary>
+    public bool LaunchAtBoot { get; set; } = false;
 }
 
 public static class SettingsStore
