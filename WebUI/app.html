@@ -1412,7 +1412,20 @@ function delAuto(i){S.autos.splice(i,1);saveAutos();render();}
 function tglAuto(i){S.autos[i].on=!S.autos[i].on;saveAutos();render();}
 function saveAutos(){try{localStorage.setItem('vm_autos',JSON.stringify(S.autos));}catch(e){}}
 var _navRot=null;
-var _dialPos=(function(){var d={x:(window.innerWidth-460)/2,y:Math.max(12,(window.innerHeight-460)/2)};try{return JSON.parse(localStorage.getItem('vm_dialPos'))||d;}catch(e){return d;}})();
+// Dial position: null = "auto-center at open time". The old code computed the center ONCE at
+// script load — before the kiosk fullscreen resize — so the dial appeared off-center. Now the
+// center is computed from the CURRENT window size every time it opens, and any user-dragged
+// position is clamped to the viewport. New storage key discards stale off-center saves.
+var _dialPos=(function(){try{return JSON.parse(localStorage.getItem('vm_dialPos2'));}catch(e){return null;}})();
+function dialPosNow(){
+  var W=window.innerWidth, H=window.innerHeight, S=460;
+  var center={x:Math.max(8,(W-S)/2), y:Math.max(12,(H-S)/2)};
+  if(!_dialPos||!isFinite(_dialPos.x)||!isFinite(_dialPos.y))return center;
+  // clamp a saved position so the dial is always fully visible on the current display
+  var maxX=W-S-8, maxY=H-S-8;
+  if(maxX<8||maxY<12)return center;
+  return {x:Math.min(Math.max(_dialPos.x,8),maxX), y:Math.min(Math.max(_dialPos.y,12),maxY)};
+}
 function navToggle(){
   S.navOpen=!S.navOpen;
   if(S.navOpen){
@@ -1467,17 +1480,18 @@ function dialDrag(ev){
 function hubDrag(ev){
   var el=document.getElementById('navDialBox');
   if(!el)return;
-  var sx=ev.clientX, sy=ev.clientY, ox=_dialPos.x, oy=_dialPos.y, moved=false;
+  var start=dialPosNow();
+  var sx=ev.clientX, sy=ev.clientY, ox=start.x, oy=start.y, moved=false;
   var hub=ev.currentTarget;
   function mv(e){
     var dx=e.clientX-sx, dy=e.clientY-sy;
     if(!moved){if(Math.abs(dx)+Math.abs(dy)<=6)return;moved=true;hub.setPointerCapture(ev.pointerId);}
-    _dialPos.x=ox+dx;_dialPos.y=oy+dy;
+    _dialPos={x:ox+dx,y:oy+dy};
     el.style.left=_dialPos.x+'px';el.style.top=_dialPos.y+'px';
   }
   function up(e){
     hub.removeEventListener('pointermove',mv);hub.removeEventListener('pointerup',up);
-    if(moved){try{localStorage.setItem('vm_dialPos',JSON.stringify(_dialPos));}catch(err){}
+    if(moved){try{localStorage.setItem('vm_dialPos2',JSON.stringify(_dialPos));}catch(err){}
       hub._suppressClick=true;setTimeout(function(){hub._suppressClick=false;},50);}
   }
   hub.addEventListener('pointermove',mv);hub.addEventListener('pointerup',up);
@@ -1504,7 +1518,7 @@ function buildCarousel(){
   }).join('');
   var curLbl=NAV.filter(function(n){return n[0]===S.screen;})[0];
   return '<div onclick="navToggle()" onwheel="event.preventDefault();navRotate(event.deltaY>0?1:-1)" style="position:fixed;inset:0;z-index:200;background:rgba(6,10,14,0.72);backdrop-filter:blur(6px);">'
-    +'<div id="navDialBox" onpointerdown="event.stopPropagation();dialDrag(event)" style="position:absolute;left:'+_dialPos.x+'px;top:'+_dialPos.y+'px;width:460px;height:460px;touch-action:none;">'
+    +(function(){var dp=dialPosNow();return '<div id="navDialBox" onpointerdown="event.stopPropagation();dialDrag(event)" style="position:absolute;left:'+dp.x+'px;top:'+dp.y+'px;width:460px;height:460px;touch-action:none;">';})()
     // machined chrome bezel (SVG, same language as the gauges)
     +(function(){
       var t='';
