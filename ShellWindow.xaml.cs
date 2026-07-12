@@ -34,6 +34,7 @@ public partial class ShellWindow : Window
     private AutomationService? _autos;
     private VisionService? _vision;
     private NmeaService? _nmea;
+    private NavicoMfdService? _navico;
 
     // Claude assistant + offline voice. _vm mirrors live readings for the assistant's get_status tool.
     private readonly DashboardViewModel _vm = new();
@@ -97,6 +98,7 @@ window.addEventListener('DOMContentLoaded', function(){
             try { _autos?.Stop(); } catch { }
             try { _vision?.Dispose(); } catch { }
             try { _nmea?.Dispose(); } catch { }
+            try { _navico?.Dispose(); } catch { }
         };
     }
 
@@ -169,6 +171,33 @@ window.addEventListener('DOMContentLoaded', function(){
         _nmea = new NmeaService(_settings.NmeaHost, _settings.NmeaPort);
         _nmea.OnUpdate += OnNmeaUpdate;
         _nmea.Start();
+
+        // Navico HTML5 integration — advertise to Simrad/B&G/Lowrance MFDs + raise alarms on them.
+        if (_settings.EnableNavicoMfd)
+        {
+            _navico = new NavicoMfdService(HttpPort, BuildMfdAlarms);
+            _navico.Start();
+        }
+    }
+
+    /// <summary>Current alarm summary for Navico MFDs, derived from live iTach state.</summary>
+    private IReadOnlyList<NavicoMfdService.Alarm> BuildMfdAlarms()
+    {
+        var list = new List<NavicoMfdService.Alarm>();
+        try
+        {
+            int? f(string ch, int i) => _client.Field(ch, i);
+            // Service bank fault (0 V / < 22 V on the 24 V bank) → Important.
+            if (f("00", 8) is int sv && sv / 10.0 < 22.0)
+                list.Add(new NavicoMfdService.Alarm("Important", 1, 1));
+            // Any tank critically low (< 15%) → Warning.
+            int lowTanks = 0;
+            foreach (var (ch, i) in new[] { ("00", 10), ("00", 11), ("03", 2), ("03", 3), ("03", 10), ("03", 11) })
+                if (f(ch, i) is int lvl && lvl < 15) lowTanks++;
+            if (lowTanks > 0) list.Add(new NavicoMfdService.Alarm("Warning", lowTanks, lowTanks));
+        }
+        catch { }
+        return list;
     }
 
     /// <summary>Pushes NMEA nav + engine data into the WebView's LIVE object and out to MQTT.</summary>
@@ -208,11 +237,19 @@ window.addEventListener('DOMContentLoaded', function(){
     { "person", "boat", "car", "truck", "bird", "dog", "cat" };
     private DateTime _lastVisionAlert = DateTime.MinValue;
 
-    /// <summary>Forwards YOLO detections to MQTT (visual sensors) and, for notable objects, to the assistant.</summary>
-    private void OnVisionDetections(string cam, IReadOnlyList<VisionService.Detection> dets)
+    /// <summary>Forwards YOLO detections to the dashboard overlay, MQTT (visual sensors), and the assistant.</summary>
+    private void OnVisionDetections(int camIndex, string cam, IReadOnlyList<VisionService.Detection> dets)
     {
         foreach (var d in dets)
             _ = _mqttAgent?.PublishVisionAsync(cam, d.Label, d.Confidence);
+
+        // Draw the detections on the dashboard's camera screen (bounding boxes + labels).
+        var overlay = dets.Select(d => new { label = d.Label, conf = Math.Round(d.Confidence, 2), x = d.X, y = d.Y, w = d.W, h = d.H }).ToArray();
+        var oj = JsonSerializer.Serialize(overlay);
+        Dispatcher.BeginInvoke(() =>
+        {
+            try { Web?.CoreWebView2?.ExecuteScriptAsync($"try{{window.camDetections&&window.camDetections({camIndex},{oj})}}catch(e){{}}"); } catch { }
+        });
 
         // Proactive alert for notable objects, rate-limited so it doesn't spam.
         var notable = dets.Where(d => NotableClasses.Contains(d.Label)).OrderByDescending(d => d.Confidence).FirstOrDefault();

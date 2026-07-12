@@ -40,6 +40,10 @@ public sealed class AppSettings
     public string NmeaHost { get; set; } = "";
     public int NmeaPort { get; set; } = 2000;
 
+    /// <summary>Announce the dashboard to Navico MFDs (Simrad/B&amp;G/Lowrance) via the HTML5 Integration
+    /// Protocol, so it appears as an app icon on the chartplotter and can raise alarms there.</summary>
+    public bool EnableNavicoMfd { get; set; } = true;
+
     /// <summary>
     /// LAN dashboard access allowlist: IP addresses and/or MAC addresses, one entry each.
     /// Empty list = every device on the LAN is allowed. Loopback is always allowed.

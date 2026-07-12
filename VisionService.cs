@@ -43,8 +43,8 @@ public sealed class VisionService : IDisposable
     private InferenceSession? _session;
     private string? _inputName;
 
-    /// <summary>Raised with (cameraName, detections) after each frame is analysed.</summary>
-    public event Action<string, IReadOnlyList<Detection>>? OnDetections;
+    /// <summary>Raised with (cameraIndex, cameraName, detections) after each frame is analysed.</summary>
+    public event Action<int, string, IReadOnlyList<Detection>>? OnDetections;
 
     public bool Enabled => _session is not null;
     public string Status { get; private set; } = "idle";
@@ -88,7 +88,7 @@ public sealed class VisionService : IDisposable
                     if (jpeg is null) continue;
                     var dets = Analyze(jpeg);
                     var name = string.IsNullOrWhiteSpace(cams[i].Name) ? $"cam{i}" : cams[i].Name;
-                    if (dets.Count > 0) OnDetections?.Invoke(name, dets);
+                    OnDetections?.Invoke(i, name, dets);   // always fire so the UI can clear stale boxes
                 }
                 catch (Exception ex) { Ip2slClient.Log("[vision] frame error: " + ex.Message); }
             }

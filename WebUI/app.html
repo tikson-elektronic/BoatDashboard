@@ -1213,6 +1213,16 @@ cameras: function(){
       +'style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:opacity .3s;'+(ir?'filter:saturate(0.35) brightness(1.1);':'')+'" '
       +'onload="this.style.opacity=1" onerror="this.style.opacity=0">';
   }
+  // YOLO detection boxes overlaid on the feed (normalised x/y/w/h from the vision service).
+  function feedBoxes(i){
+    var ds=(S.camDets&&S.camDets[i])||[];
+    if(!ds.length)return '';
+    return ds.map(function(d){
+      return '<div style="position:absolute;left:'+(d.x*100).toFixed(1)+'%;top:'+(d.y*100).toFixed(1)+'%;width:'+(d.w*100).toFixed(1)+'%;height:'+(d.h*100).toFixed(1)+'%;border:2px solid #2fc4d1;border-radius:3px;box-shadow:0 0 8px rgba(47,196,209,0.6);pointer-events:none;">'
+        +'<div style="position:absolute;top:-19px;left:-2px;background:#2fc4d1;color:#04080b;font-size:10px;font-weight:700;letter-spacing:0.4px;padding:1px 6px;border-radius:3px;white-space:nowrap;">'+d.label+' '+Math.round(d.conf*100)+'%</div>'
+      +'</div>';
+    }).join('');
+  }
   // simulated video fallback: layered gradients per camera, IR turns green-grey
   function feedBg(i){
     if(ir)return 'linear-gradient(180deg,#0c1410 0%,#15241c 45%,#0a120d 100%)';
@@ -1232,6 +1242,7 @@ cameras: function(){
   var main='<div class="card" style="padding:0;overflow:hidden;flex:2.6;min-width:min(100%,440px);display:flex;flex-direction:column;">'
     +'<div style="position:relative;aspect-ratio:16/9;background:'+feedBg(sel)+';'+(ir?'filter:saturate(0.35) brightness(1.1);':'')+'">'
     +feedImg(sel)
+    +feedBoxes(sel)
     +scanlines()
     // OSD overlay
     +'<div style="position:absolute;top:12px;left:14px;display:flex;align-items:center;gap:10px;">'
@@ -1264,7 +1275,8 @@ cameras: function(){
       +'<div style="position:absolute;bottom:6px;left:8px;right:8px;"><span class="cond" style="font-size:11px;font-weight:700;letter-spacing:1px;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,0.9);">'+c[0]+'</span></div>'
       +'<div style="position:absolute;top:6px;right:8px;width:7px;height:7px;border-radius:50%;background:'+OK+';box-shadow:0 0 6px rgba(53,208,127,0.8);"></div>'
     +'</div>';}).join('')+'</div>';
-  return '<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:22px;"><h2 class="cond" style="margin:0;">CAMERAS</h2><div class="sub">'+cams.length+' camera'+(cams.length===1?'':'s')+(haveReal?' \u00b7 live':' \u00b7 demo')+' \u00b7 NVR recording '+(S.cams.rec?'active':'paused')+'</div></div>'
+  var dcount=(S.camDets&&S.camDets[sel]||[]).length;
+  return '<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:22px;"><h2 class="cond" style="margin:0;">CAMERAS</h2><div class="sub">'+cams.length+' camera'+(cams.length===1?'':'s')+(haveReal?' \u00b7 live':' \u00b7 demo')+(dcount?' \u00b7 <span style="color:#2fc4d1;">AI: '+dcount+' object'+(dcount===1?'':'s')+'</span>':'')+' \u00b7 NVR recording '+(S.cams.rec?'active':'paused')+'</div></div>'
   +'<div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;max-width:1300px;">'+main+thumbs+'</div>';
 },
 electronics: function(){
@@ -1538,6 +1550,8 @@ function camCount(){return (S.camList&&S.camList.length)?S.camList.length:6;}
 function camStep(d){var n=camCount();S.cams.sel=(S.cams.sel+d+n)%n;render();}
 // Host injects the live camera list ([{i,name}]); render if we're on the cameras screen.
 window.camApply=function(list){try{S.camList=(typeof list==="string")?JSON.parse(list):(list||[]);}catch(e){S.camList=[];}if(S.screen==="cameras")render();};
+// YOLO detections for camera i (from the onboard vision service) — drawn as boxes on the feed.
+window.camDetections=function(i,dets){S.camDets=S.camDets||{};try{S.camDets[i]=(typeof dets==="string")?JSON.parse(dets):(dets||[]);}catch(e){S.camDets[i]=[];}if(S.screen==="cameras")render();};
 // Snapshot polling: refresh each visible feed <img> in place (no full re-render → no flicker) every 2 s.
 setInterval(function(){if(S.screen!=="cameras")return;if(!(S.camList&&S.camList.length))return;var t=Date.now();S.camTick=t;var els=document.querySelectorAll("[data-cam]");for(var i=0;i<els.length;i++){els[i].src="/api/cam?i="+els[i].getAttribute("data-cam")+"&t="+t;}},2000);
 // Remote (LAN browser) fetches the list itself; the WebView gets it pushed via camApply.
