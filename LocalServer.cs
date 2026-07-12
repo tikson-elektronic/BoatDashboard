@@ -135,6 +135,10 @@ public sealed class LocalServer : IDisposable
         mac = null;
         if (IPAddress.IsLoopback(ip)) return true;
         var allow = _allow;
+        // Empty allowlist = open LAN: the owner's boat network isn't per-device gated (the
+        // internet tunnel is still protected by the loopback Basic Auth). This avoids locking out
+        // devices like iPads, which rotate their Wi-Fi MAC and would otherwise fail the gate.
+        if (allow.Ips.Count == 0 && allow.Macs.Count == 0) { mac = MacOf(ip); return true; }
         if (allow.Ips.Contains(ip.ToString())) { mac = MacOf(ip); return true; }
         mac = MacOf(ip);
         return mac is not null && allow.Macs.Contains(mac);
