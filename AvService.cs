@@ -75,6 +75,47 @@ public sealed class AvService
     }
 
     /// <summary>Adds/updates a device; returns true if it is brand-new (fires OnNewDevice).</summary>
+    /// <summary>
+    /// Manually add an AV device by IP + protocol. Needed for devices on a different subnet than the
+    /// dashboard, which SSDP/mDNS discovery (multicast, link-local) can't reach even when they're
+    /// routable by unicast IP (e.g. a Samsung TV on 192.168.20.x). Enriches Samsung name/model from
+    /// the TV's own API when possible.
+    /// </summary>
+    public async Task<AvDevice> AddByIpAsync(string ip, string protocol, string? name = null)
+    {
+        protocol = (protocol ?? "").Trim().ToLowerInvariant();
+        if (protocol == "roku") protocol = "roku_ecp";
+        string type = protocol switch
+        {
+            "samsung" or "lg" or "sony" or "roku_ecp" or "firetv" => "tv",
+            "denon" or "yamaha" => "amplifier",
+            "sonos" or "upnp" => "speaker",
+            _ => "media",
+        };
+        if (string.IsNullOrWhiteSpace(name) && protocol == "samsung")
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(await Http.GetStringAsync($"http://{ip}:8001/api/v2/"));
+                if (doc.RootElement.TryGetProperty("device", out var dev))
+                    name = dev.TryGetProperty("name", out var n) ? n.GetString() : dev.TryGetProperty("modelName", out var m) ? m.GetString() : null;
+            }
+            catch { }
+        }
+        var d = new AvDevice
+        {
+            Id = $"{ip}:{protocol}",
+            Ip = ip,
+            Name = string.IsNullOrWhiteSpace(name) ? $"{protocol.ToUpperInvariant()} {ip}" : name!,
+            Type = type,
+            Protocol = protocol,
+            NeedsPairing = protocol is "samsung" or "lg",
+            Accepted = true,
+        };
+        Upsert(d, background: false);
+        return d;
+    }
+
     private bool Upsert(AvDevice d, bool background)
     {
         bool isNew;

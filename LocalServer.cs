@@ -352,6 +352,28 @@ public sealed class LocalServer : IDisposable
                     await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes(Av.DevicesJson()));
                     return;
                 }
+                // Manually add a device by IP + protocol (for gear on another subnet that discovery can't reach).
+                if (method == "POST" && path == "/api/av/add" && Av is not null)
+                {
+                    var b = await ReadBodyAsync(stream, lines);
+                    string ip = "", proto = "", nm = "";
+                    try
+                    {
+                        using var d = JsonDocument.Parse(b);
+                        ip = d.RootElement.TryGetProperty("ip", out var i) ? i.GetString() ?? "" : "";
+                        proto = d.RootElement.TryGetProperty("protocol", out var p) ? p.GetString() ?? "" : "";
+                        nm = d.RootElement.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+                    }
+                    catch { }
+                    if (ip.Length == 0 || proto.Length == 0)
+                        await WriteAsync(stream, "400 Bad Request", "application/json", Encoding.UTF8.GetBytes("{\"error\":\"ip and protocol required\"}"));
+                    else
+                    {
+                        var dev = await Av.AddByIpAsync(ip, proto, string.IsNullOrWhiteSpace(nm) ? null : nm);
+                        await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { added = dev.Id, name = dev.Name })));
+                    }
+                    return;
+                }
                 if (method == "POST" && path == "/api/av/control" && Av is not null)
                 {
                     var b = await ReadBodyAsync(stream, lines);
