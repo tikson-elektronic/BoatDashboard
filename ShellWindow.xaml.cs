@@ -47,14 +47,15 @@ window.vomsApply = function(d){
 };
 function __vpost(o){ try{ window.chrome.webview.postMessage(o); }catch(e){} }
 function __vsetup(){
-  var rail=document.getElementById('rail');
-  if(!rail || document.getElementById('vSetup')) return;
-  var b=document.createElement('div'); b.id='vSetup';
-  b.style.cssText='display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 4px;cursor:pointer;color:#4a5b66;font-size:9.5px;font-weight:700;letter-spacing:1.2px;';
-  b.innerHTML='<div style=""font-size:18px;line-height:1;"">⚙</div><div>SETUP</div>';
+  /* Put SYSTEM SETUP (the WPF admin dialog) at the top of the design's SETTINGS page. */
+  var main=document.getElementById('main');
+  if(!main || typeof S==='undefined' || S.screen!=='settings') return;
+  if(document.getElementById('vSetupBtn')) return;
+  var b=document.createElement('div'); b.id='vSetupBtn';
+  b.style.cssText='margin-bottom:18px;padding:18px 22px;border-radius:14px;border:1px solid #2fc4d1;background:rgba(47,196,209,0.08);cursor:pointer;display:flex;align-items:center;gap:14px;';
+  b.innerHTML='<div style=""font-size:22px;line-height:1;"">⚙</div><div><div style=""font-size:14px;font-weight:700;letter-spacing:1.5px;color:#2fc4d1;"">SYSTEM SETUP</div><div style=""font-size:12px;color:#9fb4be;margin-top:2px;"">Vessel pairing · Network · Kiosk · Logs · Claude key</div></div>';
   b.onclick=function(){ __vpost({cmd:'settings'}); };
-  var spacer=rail.querySelector('div[style*=""flex:1""]');   /* placed right under the SETTINGS nav item */
-  if(spacer) rail.insertBefore(b, spacer); else rail.appendChild(b);
+  main.insertBefore(b, main.firstChild);
 }
 window.addEventListener('DOMContentLoaded', function(){
   if(typeof window.setAllZones==='function'){

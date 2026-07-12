@@ -231,8 +231,10 @@ public sealed class LocalServer : IDisposable
                     return;
                 }
 
-                // HTTP Basic Auth (whole site) when configured.
-                if (_expectedAuth is not null)
+                // Basic Auth applies to LOOPBACK-origin traffic only — that's where a Cloudflare
+                // tunnel (or any reverse proxy) lands, and it bypasses the LAN device allowlist.
+                // LAN devices are gated by the allowlist above and never see a password prompt.
+                if (_expectedAuth is not null && IPAddress.IsLoopback(remoteIp))
                 {
                     string? got = null;
                     foreach (var l in lines)
