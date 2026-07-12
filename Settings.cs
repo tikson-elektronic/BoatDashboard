@@ -40,6 +40,15 @@ public sealed class AppSettings
     /// <summary>Vessel position for daylight-based automations (default Antibes).</summary>
     public double VesselLat { get; set; } = 43.55;
     public double VesselLon { get; set; } = 7.02;
+
+    /// <summary>Cameras / NVR streams (Blue Iris, RTSP, MJPEG) shown on the dashboard.</summary>
+    public List<CameraDef> Cameras { get; set; } = new();
+}
+
+public sealed class CameraDef
+{
+    public string Name { get; set; } = "";
+    public string Url { get; set; } = "";   // rtsp://… , http://…/mjpg/… , or an MJPEG/HTTP snapshot URL
 }
 
 public static class SettingsStore

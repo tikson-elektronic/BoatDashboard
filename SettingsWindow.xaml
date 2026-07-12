@@ -134,6 +134,12 @@
                              Foreground="{StaticResource MutedBrush}" BorderThickness="0"/>
                 </Border>
 
+                <TextBlock Text="CAMERAS / NVR" Style="{StaticResource SectionTitle}" Margin="0,20,0,2"/>
+                <TextBlock Text="One camera per line:  Name | stream URL. Use an RTSP or MJPEG URL (e.g. Blue Iris: Salon | http://192.168.0.50:81/mjpg/salon )."
+                           Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="2,6,0,4" TextWrapping="Wrap"/>
+                <TextBox x:Name="CamerasBox" AcceptsReturn="True" Height="90" FontFamily="Consolas" FontSize="12"
+                         VerticalScrollBarVisibility="Auto" TextWrapping="NoWrap"/>
+
                 <TextBlock Text="SHUT DOWN" Style="{StaticResource SectionTitle}" Margin="0,20,0,2"/>
                 <TextBlock Text="Enter the passcode to close the dashboard."
                            Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="2,4,0,0" TextWrapping="Wrap"/>

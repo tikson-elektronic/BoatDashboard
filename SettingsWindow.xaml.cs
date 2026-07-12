@@ -31,6 +31,7 @@ public partial class SettingsWindow : Window
         NetUrlText.Text = $"http://{LocalServer.LocalIPv4()}:{ShellWindow.HttpPort}";
         NetDiscoveryText.Text = "Discovery (mDNS / Bonjour): BoatDashboard._http._tcp.local";
         AllowListBox.Text = string.Join(Environment.NewLine, settings.LanAllowList);
+        CamerasBox.Text = string.Join(Environment.NewLine, settings.Cameras.Select(c => $"{c.Name} | {c.Url}"));
         RefreshPairingUi();
         LoadLogs();
 
@@ -219,6 +220,19 @@ public partial class SettingsWindow : Window
             .Split('\n')
             .Select(l => l.Trim().TrimEnd('\r'))
             .Where(l => l.Length > 0)
+            .ToList();
+        Settings.Cameras = CamerasBox.Text
+            .Split('\n')
+            .Select(l => l.Trim().TrimEnd('\r'))
+            .Where(l => l.Length > 0)
+            .Select(l =>
+            {
+                var i = l.IndexOf('|');
+                return i > 0
+                    ? new CameraDef { Name = l[..i].Trim(), Url = l[(i + 1)..].Trim() }
+                    : new CameraDef { Name = "Camera", Url = l };
+            })
+            .Where(c => c.Url.Length > 0)
             .ToList();
 
         SetLaunchAtBoot(Settings.LaunchAtBoot);

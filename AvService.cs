@@ -1,10 +1,13 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
+using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using Makaretu.Dns;
 
 namespace BoatDashboard;
 
@@ -107,7 +110,50 @@ public sealed class AvService
         {
             try { await IngestDescriptionAsync(loc, background); } catch { }
         }
+
+        try { await DiscoverEspHomeAsync(background); } catch (Exception ex) { Ip2slClient.Log("[av] esphome error: " + ex.Message); }
         return Devices;
+    }
+
+    /// <summary>Discovers ESPHome nodes over mDNS (_esphomelib._tcp). With the web_server
+    /// component they are controlled over plain HTTP (§ ControlAsync 'esphome').</summary>
+    private async Task DiscoverEspHomeAsync(bool background)
+    {
+        using var mdns = new MulticastService();
+        var srv = new Dictionary<string, (string host, int port)>(StringComparer.OrdinalIgnoreCase);
+        var addr = new Dictionary<string, IPAddress>(StringComparer.OrdinalIgnoreCase);
+
+        mdns.AnswerReceived += (_, e) =>
+        {
+            foreach (var rec in e.Message.Answers.Concat(e.Message.AdditionalRecords))
+            {
+                if (rec is SRVRecord s) srv[s.Name.ToString()] = (s.Target.ToString(), s.Port);
+                else if (rec is ARecord a) addr[a.Name.ToString()] = a.Address;
+            }
+        };
+
+        mdns.Start();
+        try
+        {
+            mdns.SendQuery("_esphomelib._tcp.local", type: DnsType.PTR);
+            await Task.Delay(3000);
+        }
+        finally { mdns.Stop(); }
+
+        foreach (var (instance, target) in srv)
+        {
+            if (!addr.TryGetValue(target.host, out var ip)) continue;
+            var friendly = instance.Split('.')[0];
+            Upsert(new AvDevice
+            {
+                Id = ip + ":esphome",
+                Ip = ip.ToString(),
+                Name = friendly,
+                Manufacturer = "ESPHome",
+                Protocol = "esphome",
+                Type = "automation",
+            }, background);
+        }
     }
 
     private static async Task SsdpSearchAsync(string st, HashSet<string> locations)
@@ -165,15 +211,16 @@ public sealed class AvService
         var isRenderer = dtype.Contains("MediaRenderer");
 
         var lo = (manu + " " + model + " " + name).ToLowerInvariant();
-        var needsPairing = lo.Contains("samsung") || lo.Contains("lg ") || lo.Contains("webos");
+        var protocol = BrandProtocol(lo);
+        var needsPairing = protocol is "samsung" or "lg";   // these prompt on the TV to authorise
         var dev2 = new AvDevice
         {
-            Id = ip + ":upnp",
+            Id = ip + ":" + protocol,
             Ip = ip,
             Name = name.Length > 0 ? name : ip,
             Manufacturer = manu,
             Model = model,
-            Protocol = "upnp",
+            Protocol = protocol,
             Type = ClassifyType(dtype, manu, model),
             NeedsPairing = needsPairing,
         };
@@ -190,7 +237,7 @@ public sealed class AvService
             else if (type.Contains("RenderingControl")) dev2.RenderingControlUrl = abs;
         }
 
-        if (isRenderer || dev2.AvTransportUrl is not null || dev2.RenderingControlUrl is not null)
+        if (isRenderer || dev2.AvTransportUrl is not null || dev2.RenderingControlUrl is not null || protocol != "upnp")
             Upsert(dev2, background);
 
         // Roku exposes ECP on :8060 — detect and add a Roku control entry.
@@ -218,6 +265,20 @@ public sealed class AvService
         }
     }
 
+    /// <summary>Maps a device's brand text to its control protocol.</summary>
+    private static string BrandProtocol(string lo)
+    {
+        if (lo.Contains("samsung")) return "samsung";
+        if (lo.Contains("webos") || Regex.IsMatch(lo, @"\blg\b")) return "lg";
+        if (lo.Contains("sony") || lo.Contains("bravia")) return "sony";
+        if (lo.Contains("yamaha")) return "yamaha";
+        if (lo.Contains("denon") || lo.Contains("marantz")) return "denon";
+        if (lo.Contains("sonos")) return "sonos";
+        if (lo.Contains("roku")) return "roku_ecp";
+        if (lo.Contains("fire tv") || lo.Contains("aftt") || lo.Contains("firestick") || lo.Contains("amazon")) return "firetv";
+        return "upnp";
+    }
+
     private static string ClassifyType(string deviceType, string manu, string model)
     {
         var s = (deviceType + " " + manu + " " + model).ToLowerInvariant();
@@ -238,7 +299,14 @@ public sealed class AvService
             return d.Protocol switch
             {
                 "roku_ecp" => await RokuAsync(d, action),
-                "upnp" => await UpnpAsync(d, action, value),
+                "upnp" or "sonos" => await UpnpAsync(d, action, value),
+                "esphome" => await EspHomeAsync(d, action, value),
+                "denon" => await DenonAsync(d, action, value),
+                "yamaha" => await YamahaAsync(d, action, value),
+                "sony" => await SonyAsync(d, action),
+                "samsung" => await SamsungAsync(d, action),
+                "lg" => await LgAsync(d, action),
+                "firetv" => await FireTvAsync(d, action),
                 _ => $"Control for '{d.Protocol}' not implemented.",
             };
         }
@@ -255,8 +323,16 @@ public sealed class AvService
         ["select"] = "Select", ["ok"] = "Select", ["input"] = "InputHDMI1",
     };
 
+    private static readonly Dictionary<string, string> RokuApps = new(StringComparer.OrdinalIgnoreCase)
+    { ["netflix"] = "12", ["youtube"] = "837", ["prime"] = "13", ["disney"] = "291097", ["spotify"] = "22297" };
+
     private static async Task<string> RokuAsync(AvDevice d, string action)
     {
+        if (RokuApps.TryGetValue(action, out var appId))
+        {
+            var lr = await Http.PostAsync($"http://{d.Ip}:8060/launch/{appId}", null);
+            return lr.IsSuccessStatusCode ? $"Roku launched {action}." : $"Roku launch {action} failed ({(int)lr.StatusCode}).";
+        }
         if (!RokuKeys.TryGetValue(action, out var key)) return $"Roku: unknown action '{action}'.";
         var resp = await Http.PostAsync($"http://{d.Ip}:8060/keypress/{key}", null);
         return resp.IsSuccessStatusCode ? $"Roku {key} sent." : $"Roku {key} failed ({(int)resp.StatusCode}).";
@@ -287,6 +363,145 @@ public sealed class AvService
             default:
                 return $"UPnP: unsupported action '{action}'.";
         }
+    }
+
+    // ---- Denon / Marantz AVR (HTTP goform) ----
+    private static async Task<string> DenonAsync(AvDevice d, string action, string? value)
+    {
+        string cmd = action switch
+        {
+            "power" or "power_on" => "PWON", "power_off" => "PWSTANDBY",
+            "vol_up" => "MVUP", "vol_down" => "MVDOWN",
+            "mute" => "MUON", "unmute" => "MUOFF",
+            "volume" => "MV" + (int.TryParse(value, out var v) ? Math.Clamp(v, 0, 98).ToString("D2") : "50"),
+            "input" => "SI" + (value ?? "TV").ToUpperInvariant(),
+            _ => "",
+        };
+        if (cmd.Length == 0) return $"Denon: unknown action '{action}'.";
+        var r = await Http.GetAsync($"http://{d.Ip}/goform/formiPhoneAppDirect.xml?{cmd}");
+        return r.IsSuccessStatusCode ? $"Denon {cmd} sent." : $"Denon {cmd} failed ({(int)r.StatusCode}).";
+    }
+
+    // ---- Yamaha AVR (YXC HTTP) ----
+    private static async Task<string> YamahaAsync(AvDevice d, string action, string? value)
+    {
+        string path = action switch
+        {
+            "power" or "power_on" => "setPower?power=on", "power_off" => "setPower?power=standby",
+            "vol_up" => "setVolume?volume=up", "vol_down" => "setVolume?volume=down",
+            "volume" => "setVolume?volume=" + (int.TryParse(value, out var v) ? v : 50),
+            "mute" => "setMute?enable=true", "unmute" => "setMute?enable=false",
+            "input" => "setInput?input=" + (value ?? "hdmi1"),
+            _ => "",
+        };
+        if (path.Length == 0) return $"Yamaha: unknown action '{action}'.";
+        var r = await Http.GetAsync($"http://{d.Ip}/YamahaExtendedControl/v1/main/{path}");
+        return r.IsSuccessStatusCode ? $"Yamaha {action} sent." : $"Yamaha {action} failed ({(int)r.StatusCode}).";
+    }
+
+    // ---- Sony Bravia (IRCC over HTTP; needs the TV's IP-control pre-shared key) ----
+    private static async Task<string> SonyAsync(AvDevice d, string action)
+    {
+        var codes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["power"] = "AAAAAQAAAAEAAAAVAw==", ["vol_up"] = "AAAAAQAAAAEAAAASAw==", ["vol_down"] = "AAAAAQAAAAEAAAATAw==",
+            ["mute"] = "AAAAAQAAAAEAAAAUAw==", ["home"] = "AAAAAQAAAAEAAAAQAw==", ["netflix"] = "AAAAAgAAABoAAAB8Aw==",
+            ["up"] = "AAAAAQAAAAEAAAB0Aw==", ["down"] = "AAAAAQAAAAEAAAB1Aw==", ["left"] = "AAAAAQAAAAEAAAA0Aw==",
+            ["right"] = "AAAAAQAAAAEAAAAzAw==", ["select"] = "AAAAAQAAAAEAAABlAw==",
+        };
+        if (!codes.TryGetValue(action, out var code)) return $"Sony: unknown action '{action}'.";
+        var soap = "<?xml version=\"1.0\"?><s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" " +
+            "s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\"><s:Body>" +
+            $"<u:X_SendIRCC xmlns:u=\"urn:schemas-sony-com:service:IRCC:1\"><IRCCCode>{code}</IRCCCode></u:X_SendIRCC></s:Body></s:Envelope>";
+        using var req = new HttpRequestMessage(HttpMethod.Post, $"http://{d.Ip}/sony/IRCC")
+        { Content = new StringContent(soap, Encoding.UTF8, "text/xml") };
+        req.Headers.Add("SOAPACTION", "\"urn:schemas-sony-com:service:IRCC:1#X_SendIRCC\"");
+        req.Headers.Add("X-Auth-PSK", "0000");   // set the same PSK on the TV (Settings → Network → IP control)
+        var r = await Http.SendAsync(req);
+        return r.IsSuccessStatusCode ? $"Sony {action} sent." : $"Sony {action} failed ({(int)r.StatusCode}) — set the IP-control PSK to 0000 on the TV.";
+    }
+
+    // ---- Samsung Tizen (WebSocket remote) ----
+    private static async Task<string> SamsungAsync(AvDevice d, string action)
+    {
+        var keys = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["power"] = "KEY_POWER", ["vol_up"] = "KEY_VOLUP", ["vol_down"] = "KEY_VOLDOWN", ["mute"] = "KEY_MUTE",
+            ["home"] = "KEY_HOME", ["up"] = "KEY_UP", ["down"] = "KEY_DOWN", ["left"] = "KEY_LEFT", ["right"] = "KEY_RIGHT",
+            ["select"] = "KEY_ENTER", ["back"] = "KEY_RETURN", ["play"] = "KEY_PLAY", ["pause"] = "KEY_PAUSE",
+        };
+        if (!keys.TryGetValue(action, out var key)) return $"Samsung: unknown action '{action}'.";
+        var name = Convert.ToBase64String(Encoding.UTF8.GetBytes("BoatDashboard"));
+        using var ws = new ClientWebSocket();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+        try { await ws.ConnectAsync(new Uri($"ws://{d.Ip}:8001/api/v2/channels/samsung.remote.control?name={name}"), cts.Token); }
+        catch { return "Samsung: connect failed — accept the authorisation prompt on the TV, then retry."; }
+        var msg = JsonSerializer.Serialize(new { method = "ms.remote.control", @params = new { Cmd = "Click", DataOfCmd = key, Option = "false", TypeOfRemote = "SendRemoteKey" } });
+        await ws.SendAsync(Encoding.UTF8.GetBytes(msg), WebSocketMessageType.Text, true, cts.Token);
+        try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token); } catch { }
+        return $"Samsung {key} sent.";
+    }
+
+    // ---- LG webOS (SSAP WebSocket; pairs by prompting on the TV) ----
+    private static async Task<string> LgAsync(AvDevice d, string action)
+    {
+        var uri = action switch
+        {
+            "vol_up" => "ssap://audio/volumeUp", "vol_down" => "ssap://audio/volumeDown",
+            "mute" => "ssap://audio/setMute", "power" => "ssap://system/turnOff",
+            "play" => "ssap://media.controls/play", "pause" => "ssap://media.controls/pause",
+            "home" => "ssap://system.launcher/close", _ => "",
+        };
+        if (uri.Length == 0) return $"LG: unknown action '{action}'.";
+        using var ws = new ClientWebSocket();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        try { await ws.ConnectAsync(new Uri($"ws://{d.Ip}:3000"), cts.Token); }
+        catch { return "LG: connect failed — accept the pairing prompt on the TV, then retry."; }
+        await ws.SendAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { type = "register", id = "reg0", payload = new { } })), WebSocketMessageType.Text, true, cts.Token);
+        var buf = new byte[8192];
+        try { await ws.ReceiveAsync(buf, cts.Token); } catch { }
+        await ws.SendAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { type = "request", id = "cmd0", uri })), WebSocketMessageType.Text, true, cts.Token);
+        try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token); } catch { }
+        return $"LG {action} sent (accept the pairing prompt on the TV if it didn't respond).";
+    }
+
+    // ---- Amazon Fire TV / Firestick (ADB over network) ----
+    private static async Task<string> FireTvAsync(AvDevice d, string action)
+    {
+        var codes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["power"] = "26", ["vol_up"] = "24", ["vol_down"] = "25", ["home"] = "3", ["up"] = "19", ["down"] = "20",
+            ["left"] = "21", ["right"] = "22", ["select"] = "23", ["play"] = "85", ["pause"] = "85", ["back"] = "4",
+        };
+        if (!codes.TryGetValue(action, out var kc)) return $"Fire TV: unknown action '{action}'.";
+        try
+        {
+            await RunAdbAsync($"connect {d.Ip}:5555");
+            await RunAdbAsync($"-s {d.Ip}:5555 shell input keyevent {kc}");
+            return $"Fire TV {action} sent.";
+        }
+        catch (Exception ex) { return "Fire TV: ADB failed — enable ADB debugging on the device and install platform-tools. " + ex.Message; }
+    }
+
+    private static async Task<string> RunAdbAsync(string args)
+    {
+        var psi = new ProcessStartInfo { FileName = "adb", Arguments = args, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
+        using var p = Process.Start(psi);
+        if (p is null) return "";
+        var o = await p.StandardOutput.ReadToEndAsync();
+        await p.WaitForExitAsync();
+        return o;
+    }
+
+    // ---- ESPHome web_server (HTTP) ----
+    // action is a web_server path like "switch/relay1/toggle", "light/lamp/turn_on",
+    // "cover/blind/open"; 'value' is optional query (e.g. "brightness=200").
+    private static async Task<string> EspHomeAsync(AvDevice d, string action, string? value)
+    {
+        var url = $"http://{d.Ip}/{action.TrimStart('/')}";
+        if (!string.IsNullOrEmpty(value)) url += (url.Contains('?') ? "&" : "?") + value;
+        var resp = await Http.PostAsync(url, null);
+        return resp.IsSuccessStatusCode ? $"ESPHome {action} sent." : $"ESPHome {action} failed ({(int)resp.StatusCode}).";
     }
 
     private static async Task<string> SoapAsync(string? controlUrl, string service, string action, string args)
