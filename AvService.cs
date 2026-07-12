@@ -515,7 +515,7 @@ public sealed class AvService
         // already have a token, HOLD the connection open and keep reading until the token arrives (up to
         // 40 s, giving the user time to grab the remote and accept). With a token, just a quick read.
         bool hadToken = !string.IsNullOrEmpty(d.ClientKey);
-        bool denied = false;
+        bool denied = false, timedOut = false;
         var buf = new byte[8192];
         var deadline = DateTime.UtcNow.AddSeconds(hadToken ? 4 : 40);
         using (var readCts = new CancellationTokenSource(TimeSpan.FromSeconds(hadToken ? 4 : 42)))
@@ -535,24 +535,68 @@ public sealed class AvService
                     if (root.TryGetProperty("data", out var data) && data.TryGetProperty("token", out var tok) && tok.GetString() is { Length: > 0 } t)
                     { d.ClientKey = t; break; }                        // accepted → token issued
                     if (ev == "ms.channel.unauthorized") { denied = true; break; }  // user tapped Deny
+                    if (ev == "ms.channel.timeOut") { timedOut = true; break; }     // TV refused the secure channel
                     if (hadToken && ev == "ms.channel.connect") break; // already authorised
                 }
                 catch { }
             }
         }
 
-        // Only send the keypress once we're authorised (a key sent before acceptance is ignored anyway).
+        // Authorised (token captured on 8002, or we already had one) → send the key and finish.
         if (!string.IsNullOrEmpty(d.ClientKey) || hadToken)
         {
-            var msg = JsonSerializer.Serialize(new { method = "ms.remote.control", @params = new { Cmd = "Click", DataOfCmd = key, Option = "false", TypeOfRemote = "SendRemoteKey" } });
-            try { await ws.SendAsync(Encoding.UTF8.GetBytes(msg), WebSocketMessageType.Text, true, cts.Token); } catch { }
+            var okMsg = JsonSerializer.Serialize(new { method = "ms.remote.control", @params = new { Cmd = "Click", DataOfCmd = key, Option = "false", TypeOfRemote = "SendRemoteKey" } });
+            try { await ws.SendAsync(Encoding.UTF8.GetBytes(okMsg), WebSocketMessageType.Text, true, cts.Token); } catch { }
+            try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token); } catch { }
+            return $"Samsung {key} sent (paired).";
         }
-        try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token); } catch { }
+        if (denied)
+        {
+            try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token); } catch { }
+            return "Samsung: you tapped Deny on the TV - re-run and choose Allow to pair.";
+        }
 
-        if (denied) return "Samsung: you tapped Deny on the TV. Re-run and choose Allow to pair.";
-        return string.IsNullOrEmpty(d.ClientKey)
-            ? "Samsung: waiting for you to accept the 'Allow' prompt on the TV (look for it on screen, then run this again). If no prompt appears, enable External Device Manager > Device Connect Manager > Access Notification on the TV."
-            : $"Samsung {key} sent (paired ✓).";
+        // Secure channel refused (instant timeOut, no prompt) → fall back to the LEGACY ws:8001 channel.
+        // Many sets accept unpaired clients there, or at least surface the Allow prompt that 8002 won't.
+        if (timedOut && string.IsNullOrEmpty(d.ClientKey))
+        {
+            try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None); } catch { }
+            Ip2slClient.Log("[samsung] 8002 refused (timeOut) -> trying legacy ws:8001");
+            using var lg = new ClientWebSocket();
+            using var lcts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+            try { await lg.ConnectAsync(new Uri($"ws://{d.Ip}:8001/api/v2/channels/samsung.remote.control?name={name}"), lcts.Token); }
+            catch (Exception lex) { Ip2slClient.Log("[samsung] 8001 connect failed: " + lex.Message); return "Samsung: TV refused both control channels — enable Settings > General > External Device Manager > Device Connect Manager > Access Notification on the TV."; }
+
+            bool legacyReady = false;
+            var ldeadline = DateTime.UtcNow.AddSeconds(40);
+            while (DateTime.UtcNow < ldeadline)
+            {
+                WebSocketReceiveResult lres;
+                try { lres = await lg.ReceiveAsync(buf, lcts.Token); }
+                catch (Exception rex) { Ip2slClient.Log("[samsung] 8001 receive ended: " + rex.Message); break; }
+                var lframe = Encoding.UTF8.GetString(buf, 0, lres.Count);
+                Ip2slClient.Log("[samsung] 8001 frame: " + (lframe.Length > 180 ? lframe[..180] : lframe));
+                if (lframe.Contains("ms.channel.connect")) { legacyReady = true; break; }
+                // 'unauthorized' = the Allow prompt is showing / not yet accepted. KEEP WAITING for the
+                // user to tap Allow (which then sends ms.channel.connect). Don't treat it as a denial.
+                if (lframe.Contains("ms.channel.timeOut")) break;
+            }
+            if (legacyReady)
+            {
+                var lmsg = JsonSerializer.Serialize(new { method = "ms.remote.control", @params = new { Cmd = "Click", DataOfCmd = key, Option = "false", TypeOfRemote = "SendRemoteKey" } });
+                try { await lg.SendAsync(Encoding.UTF8.GetBytes(lmsg), WebSocketMessageType.Text, true, lcts.Token); } catch { }
+                await Task.Delay(400);
+                try { await lg.CloseAsync(WebSocketCloseStatus.NormalClosure, "", lcts.Token); } catch { }
+                d.ClientKey ??= "legacy";   // mark paired via legacy channel
+                return $"Samsung {key} sent (legacy 8001 ✓).";
+            }
+            try { await lg.CloseAsync(WebSocketCloseStatus.NormalClosure, "", lcts.Token); } catch { }
+        }
+
+        if (denied) return "Samsung: you tapped Deny on the TV - re-run and choose Allow to pair.";
+        return "Samsung: the TV refused the control channel (instant timeout on both 8002 and 8001). "
+             + "This is the TV blocking remote apps: turn ON Settings > General > External Device Manager > "
+             + "Device Connect Manager > Access Notification, remove any old device entry there, then try once more.";
     }
 
     // ---- LG webOS (SSAP WebSocket) ----
