@@ -27,6 +27,8 @@ public sealed class AvDevice
     public bool AutoAdded { get; set; }              // added automatically by the background scanner
     public DateTime LastSeen { get; set; } = DateTime.UtcNow;
     public bool Accepted { get; set; }               // user approved it into the system
+    public string Psk { get; set; } = "0000";        // Sony IP-control pre-shared key (set the same on the TV)
+    public string? ClientKey { get; set; }           // LG webOS pairing key / Samsung token, persisted after first pair
     public bool Online => (DateTime.UtcNow - LastSeen).TotalSeconds < 150;   // watched: 3 missed scans
 }
 
@@ -293,7 +295,13 @@ public sealed class AvService
     /// <summary>Executes an action against a device. Returns a short status string.</summary>
     public async Task<string> ControlAsync(string id, string action, string? value)
     {
-        if (!_devices.TryGetValue(id, out var d)) return "Unknown device.";
+        // Accept an exact device id OR a fuzzy name/type (e.g. "salon tv", "sonos") from any caller —
+        // the LAN and WebView control paths pass raw user input, so resolve it here centrally.
+        if (!_devices.TryGetValue(id, out var d))
+        {
+            d = Match(id);
+            if (d is null) return $"No AV device matching '{id}'.";
+        }
         try
         {
             return d.Protocol switch
@@ -416,9 +424,9 @@ public sealed class AvService
         using var req = new HttpRequestMessage(HttpMethod.Post, $"http://{d.Ip}/sony/IRCC")
         { Content = new StringContent(soap, Encoding.UTF8, "text/xml") };
         req.Headers.Add("SOAPACTION", "\"urn:schemas-sony-com:service:IRCC:1#X_SendIRCC\"");
-        req.Headers.Add("X-Auth-PSK", "0000");   // set the same PSK on the TV (Settings → Network → IP control)
+        req.Headers.Add("X-Auth-PSK", string.IsNullOrEmpty(d.Psk) ? "0000" : d.Psk);   // set the same PSK on the TV (Settings → Network → IP control)
         var r = await Http.SendAsync(req);
-        return r.IsSuccessStatusCode ? $"Sony {action} sent." : $"Sony {action} failed ({(int)r.StatusCode}) — set the IP-control PSK to 0000 on the TV.";
+        return r.IsSuccessStatusCode ? $"Sony {action} sent." : $"Sony {action} failed ({(int)r.StatusCode}) — set the TV's IP-control PSK to match ('{(string.IsNullOrEmpty(d.Psk) ? "0000" : d.Psk)}').";
     }
 
     // ---- Samsung Tizen (WebSocket remote) ----
@@ -432,38 +440,146 @@ public sealed class AvService
         };
         if (!keys.TryGetValue(action, out var key)) return $"Samsung: unknown action '{action}'.";
         var name = Convert.ToBase64String(Encoding.UTF8.GetBytes("BoatDashboard"));
+
+        // Modern Samsung (2016+) uses secure wss:8002 with a token issued on first authorisation.
+        // We accept the TV's self-signed cert, capture the token from the connect frame, and persist it
+        // so later commands are silent. Fall back to legacy ws:8001 for older sets.
         using var ws = new ClientWebSocket();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
-        try { await ws.ConnectAsync(new Uri($"ws://{d.Ip}:8001/api/v2/channels/samsung.remote.control?name={name}"), cts.Token); }
-        catch { return "Samsung: connect failed — accept the authorisation prompt on the TV, then retry."; }
+        ws.Options.RemoteCertificateValidationCallback = (_, _, _, _) => true;   // TV serves a self-signed cert
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+
+        string tokenQs = string.IsNullOrEmpty(d.ClientKey) ? "" : $"&token={d.ClientKey}";
+        bool secure = true;
+        try { await ws.ConnectAsync(new Uri($"wss://{d.Ip}:8002/api/v2/channels/samsung.remote.control?name={name}{tokenQs}"), cts.Token); }
+        catch
+        {
+            secure = false;
+            using var ws2 = new ClientWebSocket();
+            using var cts2 = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+            try { await ws2.ConnectAsync(new Uri($"ws://{d.Ip}:8001/api/v2/channels/samsung.remote.control?name={name}"), cts2.Token); }
+            catch { return "Samsung: connect failed — accept the authorisation prompt on the TV, then retry."; }
+            var m = JsonSerializer.Serialize(new { method = "ms.remote.control", @params = new { Cmd = "Click", DataOfCmd = key, Option = "false", TypeOfRemote = "SendRemoteKey" } });
+            await ws2.SendAsync(Encoding.UTF8.GetBytes(m), WebSocketMessageType.Text, true, cts2.Token);
+            try { await ws2.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts2.Token); } catch { }
+            return $"Samsung {key} sent (legacy).";
+        }
+
+        // Read the connect frame — it carries the auth token on first pairing.
+        try
+        {
+            var buf = new byte[8192];
+            var res = await ws.ReceiveAsync(buf, cts.Token);
+            var frame = Encoding.UTF8.GetString(buf, 0, res.Count);
+            using var doc = JsonDocument.Parse(frame);
+            if (doc.RootElement.TryGetProperty("data", out var data) &&
+                data.TryGetProperty("token", out var tok) && tok.GetString() is { Length: > 0 } t)
+                d.ClientKey = t;   // persist the token for silent future commands
+        }
+        catch { }
+
         var msg = JsonSerializer.Serialize(new { method = "ms.remote.control", @params = new { Cmd = "Click", DataOfCmd = key, Option = "false", TypeOfRemote = "SendRemoteKey" } });
         await ws.SendAsync(Encoding.UTF8.GetBytes(msg), WebSocketMessageType.Text, true, cts.Token);
         try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token); } catch { }
-        return $"Samsung {key} sent.";
+        return string.IsNullOrEmpty(d.ClientKey)
+            ? $"Samsung {key} sent — if nothing happened, accept the 'Allow' prompt on the TV once."
+            : $"Samsung {key} sent.";
     }
 
-    // ---- LG webOS (SSAP WebSocket; pairs by prompting on the TV) ----
+    // ---- LG webOS (SSAP WebSocket) ----
+    // webOS pairs once: register with a permission manifest, the TV prompts, and returns a "client-key".
+    // We persist that key on the device so subsequent connects register silently. Some actions carry a payload.
+    private static readonly string[] LgPermissions =
+    {
+        "LAUNCH", "CONTROL_AUDIO", "CONTROL_POWER", "CONTROL_INPUT_MEDIA_PLAYBACK",
+        "CONTROL_INPUT_TV", "READ_INSTALLED_APPS", "CONTROL_DISPLAY", "CONTROL_INPUT_JOYSTICK",
+        "CONTROL_INPUT_MEDIA_RECORDING", "CONTROL_INPUT_TEXT", "CONTROL_MOUSE_AND_KEYBOARD",
+    };
+
     private static async Task<string> LgAsync(AvDevice d, string action)
     {
-        var uri = action switch
+        // (uri, payload) per action — setMute needs {mute:true}.
+        (string uri, object? payload) = action switch
         {
-            "vol_up" => "ssap://audio/volumeUp", "vol_down" => "ssap://audio/volumeDown",
-            "mute" => "ssap://audio/setMute", "power" => "ssap://system/turnOff",
-            "play" => "ssap://media.controls/play", "pause" => "ssap://media.controls/pause",
-            "home" => "ssap://system.launcher/close", _ => "",
+            "vol_up" => ("ssap://audio/volumeUp", (object?)null),
+            "vol_down" => ("ssap://audio/volumeDown", null),
+            "mute" => ("ssap://audio/setMute", new { mute = true }),
+            "unmute" => ("ssap://audio/setMute", new { mute = false }),
+            "power" or "power_off" => ("ssap://system/turnOff", null),
+            "play" => ("ssap://media.controls/play", null),
+            "pause" => ("ssap://media.controls/pause", null),
+            "stop" => ("ssap://media.controls/stop", null),
+            "home" => ("ssap://system.launcher/close", null),
+            _ => ("", null),
         };
         if (uri.Length == 0) return $"LG: unknown action '{action}'.";
+
         using var ws = new ClientWebSocket();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         try { await ws.ConnectAsync(new Uri($"ws://{d.Ip}:3000"), cts.Token); }
-        catch { return "LG: connect failed — accept the pairing prompt on the TV, then retry."; }
-        await ws.SendAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { type = "register", id = "reg0", payload = new { } })), WebSocketMessageType.Text, true, cts.Token);
-        var buf = new byte[8192];
-        try { await ws.ReceiveAsync(buf, cts.Token); } catch { }
-        await ws.SendAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { type = "request", id = "cmd0", uri })), WebSocketMessageType.Text, true, cts.Token);
+        catch { return "LG: connect failed — is the TV on and on the network?"; }
+
+        // 1) Register (include a stored client-key if we have one; else the TV prompts to pair).
+        var manifest = new
+        {
+            manifestVersion = 1,
+            permissions = LgPermissions,
+        };
+        var reg = new Dictionary<string, object?>
+        {
+            ["forcePairing"] = false,
+            ["pairingType"] = "PROMPT",
+            ["manifest"] = manifest,
+        };
+        if (!string.IsNullOrEmpty(d.ClientKey)) reg["client-key"] = d.ClientKey;
+        await SendJsonAsync(ws, new { type = "register", id = "register_0", payload = reg }, cts.Token);
+
+        // 2) Read frames until we're registered (capturing the client-key) or time out.
+        bool registered = !string.IsNullOrEmpty(d.ClientKey);
+        var buf = new byte[16384];
+        var sb = new StringBuilder();
+        var deadline = DateTime.UtcNow.AddSeconds(6);
+        while (!registered && DateTime.UtcNow < deadline)
+        {
+            WebSocketReceiveResult res;
+            try { res = await ws.ReceiveAsync(buf, cts.Token); }
+            catch { break; }
+            sb.Append(Encoding.UTF8.GetString(buf, 0, res.Count));
+            if (!res.EndOfMessage) continue;
+            var frame = sb.ToString(); sb.Clear();
+            try
+            {
+                using var doc = JsonDocument.Parse(frame);
+                var root = doc.RootElement;
+                var t = root.TryGetProperty("type", out var tt) ? tt.GetString() : "";
+                if (t == "registered")
+                {
+                    if (root.TryGetProperty("payload", out var pl) && pl.TryGetProperty("client-key", out var ck))
+                        d.ClientKey = ck.GetString();   // persist for silent re-pair next time
+                    registered = true;
+                }
+                else if (t == "error") { break; }
+                // "response" to the prompt (PROMPT pairing) arrives before "registered" — keep reading.
+            }
+            catch { }
+        }
+        if (!registered)
+        {
+            try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token); } catch { }
+            return "LG: waiting for the pairing prompt — accept 'BoatDashboard' on the TV, then retry.";
+        }
+
+        // 3) Send the command with any payload.
+        object cmd = payload is null
+            ? new { type = "request", id = "cmd_0", uri }
+            : new { type = "request", id = "cmd_0", uri, payload };
+        await SendJsonAsync(ws, cmd, cts.Token);
+        try { await ws.ReceiveAsync(buf, cts.Token); } catch { }   // let the command land before closing
         try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token); } catch { }
-        return $"LG {action} sent (accept the pairing prompt on the TV if it didn't respond).";
+        return $"LG {action} sent.";
     }
+
+    private static Task SendJsonAsync(ClientWebSocket ws, object o, CancellationToken ct)
+        => ws.SendAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(o)), WebSocketMessageType.Text, true, ct);
 
     // ---- Amazon Fire TV / Firestick (ADB over network) ----
     private static async Task<string> FireTvAsync(AvDevice d, string action)

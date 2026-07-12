@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.IO;
+using System.Text;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Input;
@@ -25,11 +26,14 @@ public partial class ShellWindow : Window
     private LocalServer? _server;
     private MulticastService? _mdns;
     private ServiceDiscovery? _sd;
+    private CloudflareTunnelService? _cf;
 
     private MqttAgent? _mqttAgent;   // onboard VOMS agent (publishes to the Alive cloud when paired)
     private readonly AvService _av = new();   // AV device discovery + control (TVs, amplifiers)
     private readonly MemoryStore _memory = new();
     private AutomationService? _autos;
+    private VisionService? _vision;
+    private NmeaService? _nmea;
 
     // Claude assistant + offline voice. _vm mirrors live readings for the assistant's get_status tool.
     private readonly DashboardViewModel _vm = new();
@@ -85,11 +89,14 @@ window.addEventListener('DOMContentLoaded', function(){
             _timer.Stop();
             _client.Dispose();
             try { _server?.Dispose(); } catch { }
+            try { _cf?.Dispose(); } catch { }
             try { _sd?.Dispose(); _mdns?.Dispose(); } catch { }
             try { _voice?.Dispose(); } catch { }
             try { _ = _mqttAgent?.DisposeAsync(); } catch { }
             try { _av.StopBackgroundScan(); } catch { }
             try { _autos?.Stop(); } catch { }
+            try { _vision?.Dispose(); } catch { }
+            try { _nmea?.Dispose(); } catch { }
         };
     }
 
@@ -110,12 +117,23 @@ window.addEventListener('DOMContentLoaded', function(){
 
         await core.AddScriptToExecuteOnDocumentCreatedAsync(BridgeJs);
         core.WebMessageReceived += OnWebMessage;
-        core.NavigationCompleted += (_, _) => { ApplyCursor(); ApplyBlink(); PushAssistantState(); };
+        core.NavigationCompleted += (_, _) => { ApplyCursor(); ApplyBlink(); PushAssistantState(); PushCameras(); };
+        // Self-heal: if the WebView render/browser process dies, reload the UI instead of showing a blank screen.
+        core.ProcessFailed += (_, args) =>
+        {
+            Ip2slClient.Log("[selfheal] webview process failed: " + args.ProcessFailedKind);
+            Dispatcher.BeginInvoke(() => { try { Web.CoreWebView2?.Navigate("https://vessel.local/app.html"); } catch { } });
+        };
 
         // Serve the WebUI folder over a virtual host so relative asset paths resolve.
         var webDir = Path.Combine(AppContext.BaseDirectory, "WebUI");
         core.SetVirtualHostNameToFolderMapping(
             "vessel.local", webDir, CoreWebView2HostResourceAccessKind.Allow);
+
+        // Intercept /api/cam* so camera feeds are same-origin in the WebView (no mixed-content block).
+        core.AddWebResourceRequestedFilter("https://vessel.local/api/*", CoreWebView2WebResourceContext.All);
+        core.WebResourceRequested += OnWebResourceRequested;
+
         core.Navigate("https://vessel.local/app.html");
 
         ApplyKiosk();
@@ -141,6 +159,72 @@ window.addEventListener('DOMContentLoaded', function(){
         _autos.Lat = _settings.VesselLat;
         _autos.Lon = _settings.VesselLon;
         _autos.Start();
+
+        // YOLO visual sensors — analyses camera frames if a model is present (graceful no-op otherwise).
+        _vision = new VisionService(() => _settings.Cameras ?? new());
+        _vision.OnDetections += OnVisionDetections;
+        _vision.Start();
+
+        // NMEA 2000 (via a gateway) — real navigation + engine data (graceful no-op if no gateway).
+        _nmea = new NmeaService(_settings.NmeaHost, _settings.NmeaPort);
+        _nmea.OnUpdate += OnNmeaUpdate;
+        _nmea.Start();
+    }
+
+    /// <summary>Pushes NMEA nav + engine data into the WebView's LIVE object and out to MQTT.</summary>
+    private void OnNmeaUpdate(NmeaService.NavState s)
+    {
+        var nav = new
+        {
+            lat = s.Lat, lon = s.Lon, sog = s.Sog, cog = s.Cog, heading = s.Heading,
+            variation = s.Variation, depth = s.Depth, windSpeed = s.WindSpeed, windAngle = s.WindAngle,
+            satellites = s.Satellites, hdop = s.Hdop, fix = s.FixQuality,
+        };
+        var engines = new
+        {
+            running = s.AnyEngineData,
+            port = new { rpm = s.Engines[0].Rpm, coolant = s.Engines[0].CoolantTempC, oil = s.Engines[0].OilPressureKpa, hours = s.Engines[0].Hours, alt = s.Engines[0].AlternatorV, fuel = s.Engines[0].FuelRateLph },
+            stbd = new { rpm = s.Engines[1].Rpm, coolant = s.Engines[1].CoolantTempC, oil = s.Engines[1].OilPressureKpa, hours = s.Engines[1].Hours, alt = s.Engines[1].AlternatorV, fuel = s.Engines[1].FuelRateLph },
+        };
+        var json = JsonSerializer.Serialize(new { nav, engines });
+        Dispatcher.BeginInvoke(() =>
+        {
+            try { Web?.CoreWebView2?.ExecuteScriptAsync($"window.vomsApply({json})"); } catch { }
+        });
+
+        // Publish the key nav + engine sensors to the cloud too.
+        var m = _mqttAgent;
+        if (m is not null)
+        {
+            void nv(string n, double? v, string u) { if (v is not null) _ = m.PublishNavAsync(n, v.Value, u); }
+            nv("sog", s.Sog, "kn"); nv("cog", s.Cog, "deg"); nv("heading", s.Heading, "deg");
+            nv("depth", s.Depth, "m"); nv("wind-speed", s.WindSpeed, "kn"); nv("wind-angle", s.WindAngle, "deg");
+            nv("engine-port-rpm", s.Engines[0].Rpm, "rpm"); nv("engine-stbd-rpm", s.Engines[1].Rpm, "rpm");
+            nv("engine-port-coolant", s.Engines[0].CoolantTempC, "C"); nv("engine-stbd-coolant", s.Engines[1].CoolantTempC, "C");
+        }
+    }
+
+    private static readonly HashSet<string> NotableClasses = new(StringComparer.OrdinalIgnoreCase)
+    { "person", "boat", "car", "truck", "bird", "dog", "cat" };
+    private DateTime _lastVisionAlert = DateTime.MinValue;
+
+    /// <summary>Forwards YOLO detections to MQTT (visual sensors) and, for notable objects, to the assistant.</summary>
+    private void OnVisionDetections(string cam, IReadOnlyList<VisionService.Detection> dets)
+    {
+        foreach (var d in dets)
+            _ = _mqttAgent?.PublishVisionAsync(cam, d.Label, d.Confidence);
+
+        // Proactive alert for notable objects, rate-limited so it doesn't spam.
+        var notable = dets.Where(d => NotableClasses.Contains(d.Label)).OrderByDescending(d => d.Confidence).FirstOrDefault();
+        if (notable is not null && (DateTime.UtcNow - _lastVisionAlert).TotalSeconds > 30)
+        {
+            _lastVisionAlert = DateTime.UtcNow;
+            var msg = $"I can see a {notable.Label} on the {cam} camera.";
+            Dispatcher.BeginInvoke(() =>
+            {
+                try { Web?.CoreWebView2?.ExecuteScriptAsync($"try{{window.assistNotify&&window.assistNotify({JsonSerializer.Serialize(msg)})}}catch(e){{}}"); } catch { }
+            });
+        }
     }
 
     /// <summary>The being announces a freshly-discovered device to the owner (chat + voice).</summary>
@@ -270,6 +354,8 @@ window.addEventListener('DOMContentLoaded', function(){
             _server = new LocalServer(webDir, HttpPort, _settings.LanUser, _settings.LanPass);
             _server.SetAllowList(_settings.LanAllowList);
             _server.Av = _av;
+            _server.Itach = _client;
+            _server.Cameras = _settings.Cameras;
             // Route remote-browser commands through the same handler as the WebView2 bridge.
             _server.OnCommand = (cmd, code) => Dispatcher.BeginInvoke(() => RunCommand(cmd, code));
             _server.Start();
@@ -284,6 +370,68 @@ window.addEventListener('DOMContentLoaded', function(){
             _mdns.Start();
         }
         catch (Exception ex) { Ip2slClient.Log("[lan] mdns failed: " + ex.Message); }
+
+        // Optional Cloudflare quick tunnel — off unless the owner enabled it (exposes the boat publicly).
+        if (_settings.EnableCloudflareTunnel)
+        {
+            try
+            {
+                _cf = new CloudflareTunnelService(HttpPort);
+                _cf.UrlChanged += url => Dispatcher.BeginInvoke(() =>
+                {
+                    if (!string.IsNullOrEmpty(url))
+                        Web?.CoreWebView2?.ExecuteScriptAsync(
+                            $"try{{window.assistNotify&&window.assistNotify('Remote access is live at {url} (login required).')}}catch(e){{}}");
+                });
+                _cf.Start();
+            }
+            catch (Exception ex) { Ip2slClient.Log("[cloudflare] start failed: " + ex.Message); }
+        }
+    }
+
+    /// <summary>Pushes the configured camera list to the WebView (which isn't a __remote client).</summary>
+    private void PushCameras()
+    {
+        var cams = _settings.Cameras ?? new();
+        var list = cams.Select((c, i) => new { i, name = string.IsNullOrWhiteSpace(c.Name) ? $"Camera {i + 1}" : c.Name });
+        var json = JsonSerializer.Serialize(list);
+        _ = Web.CoreWebView2?.ExecuteScriptAsync($"window.camApply({json})");
+    }
+
+    /// <summary>Serves /api/cameras and /api/cam?i=N to the WebView, same-origin, so camera feeds render
+    /// without a mixed-content block. Camera frames are fetched server-side (any HTTP/MJPEG source).</summary>
+    private async void OnWebResourceRequested(object? sender, CoreWebView2WebResourceRequestedEventArgs e)
+    {
+        string uri = e.Request.Uri;
+        if (uri.IndexOf("/api/cam", StringComparison.OrdinalIgnoreCase) < 0) return;
+        var env = Web.CoreWebView2.Environment;
+        var deferral = e.GetDeferral();
+        try
+        {
+            var u = new Uri(uri);
+            var cams = _settings.Cameras ?? new();
+            if (u.AbsolutePath.Equals("/api/cameras", StringComparison.OrdinalIgnoreCase))
+            {
+                var list = cams.Select((c, i) => new { i, name = string.IsNullOrWhiteSpace(c.Name) ? $"Camera {i + 1}" : c.Name });
+                var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(list));
+                e.Response = env.CreateWebResourceResponse(new MemoryStream(bytes), 200, "OK",
+                    "Content-Type: application/json\r\nAccess-Control-Allow-Origin: *");
+            }
+            else if (u.AbsolutePath.Equals("/api/cam", StringComparison.OrdinalIgnoreCase))
+            {
+                int idx = 0;
+                foreach (var kv in u.Query.TrimStart('?').Split('&'))
+                    if (kv.StartsWith("i=") && int.TryParse(kv[2..], out var pi)) idx = pi;
+                byte[]? jpeg = (idx >= 0 && idx < cams.Count && !string.IsNullOrWhiteSpace(cams[idx].Url))
+                    ? await LocalServer.FetchSnapshotAsync(cams[idx].Url)
+                    : null;
+                e.Response = jpeg is not null
+                    ? env.CreateWebResourceResponse(new MemoryStream(jpeg), 200, "OK", "Content-Type: image/jpeg\r\nCache-Control: no-store")
+                    : env.CreateWebResourceResponse(null, 502, "Bad Gateway", "");
+            }
+        }
+        catch { }
+        finally { deferral.Complete(); }
     }
 
     /// <summary>Executes a hardware command from either the WebView2 bridge or a LAN client.</summary>
@@ -386,6 +534,14 @@ window.addEventListener('DOMContentLoaded', function(){
         double serviceV = V("00", 8);
         double shoreV = F("02", 0), shoreA = F("02", 1), shoreHz = V("02", 2);
 
+        // Previously-hidden electrical detail (confirmed live on the raw dump).
+        double shore2V = F("02", 3), shore2A = F("02", 4), shore2Hz = V("02", 5);
+        double genV = F("02", 6), genA = F("02", 7), genHz = V("02", 8);
+        double invV = F("02", 9), invA = F("02", 10), invHz = V("02", 11);
+        double bGenV = V("00", 2), bPortV = V("00", 4), bStbdV = V("00", 6);
+        double bGenA = F("00", 3) - 512, bPortA = F("00", 5) - 512, bStbdA = F("00", 7) - 512;
+        double fuelToTransfer = F("03", 8), fuelToGo = F("03", 9);
+
         double waterAvg = Math.Round((waterPort + waterStbd) / 2.0);
         double fuelAvg = Math.Round((fFwdPort + fFwdStbd + fAftPort + fAftStbd) / 4.0);
         bool serviceLow = serviceV < 22.0; // 24 V bank; below ~22 V is a fault
@@ -393,6 +549,21 @@ window.addEventListener('DOMContentLoaded', function(){
         var live = new
         {
             ac = new { v = (int)shoreV, a = (int)shoreA, hz = Math.Round(shoreHz, 1) },
+            // Full AC picture — shore 1, shore 2, generator, inverter.
+            acDetail = new
+            {
+                shore1 = new { v = (int)shoreV, a = (int)shoreA, hz = Math.Round(shoreHz, 1) },
+                shore2 = new { v = (int)shore2V, a = (int)shore2A, hz = Math.Round(shore2Hz, 1) },
+                generator = new { v = (int)genV, a = (int)genA, hz = Math.Round(genHz, 1) },
+                inverter = new { v = (int)invV, a = (int)invA, hz = Math.Round(invHz, 1) },
+            },
+            batteries = new
+            {
+                genset = new { v = bGenV, a = (int)bGenA },
+                portEngine = new { v = bPortV, a = (int)bPortA },
+                stbdEngine = new { v = bStbdV, a = (int)bStbdA },
+                service = new { v = serviceV, a = 0 },
+            },
             tanks = new
             {
                 waterPort = (int)waterPort,
@@ -402,6 +573,7 @@ window.addEventListener('DOMContentLoaded', function(){
                 fuelAftStbd = (int)fAftStbd,
                 fuelFwdStbd = (int)fFwdStbd,
             },
+            fuelTransfer = new { toTransfer = (int)fuelToTransfer, toGo = (int)fuelToGo },
             waterAvg = (int)waterAvg,
             fuelAvg = (int)fuelAvg,
             service = new { v = serviceV.ToString("0.0"), low = serviceLow },

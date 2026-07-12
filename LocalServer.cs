@@ -1,5 +1,6 @@
 using System.IO;
 using System.Net;
+using System.Net.Http;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -30,6 +31,13 @@ public sealed class LocalServer : IDisposable
 
     /// <summary>AV discovery/control for remote (iPad) clients.</summary>
     public AvService? Av;
+
+    /// <summary>iTach client, for the /api/raw debug dump (reads cached frames only).</summary>
+    public Ip2slClient? Itach;
+
+    /// <summary>Configured cameras (name + feed URL). Served via /api/cameras and proxied via /api/cam.</summary>
+    public IReadOnlyList<CameraDef>? Cameras;
+    private static readonly HttpClient CamHttp = new() { Timeout = TimeSpan.FromSeconds(8) };
 
     /// <summary>Expected "Basic &lt;base64(user:pass)&gt;" value, or null when auth is disabled.</summary>
     private readonly string? _expectedAuth;
@@ -179,8 +187,18 @@ public sealed class LocalServer : IDisposable
                 if (parts.Length < 2) return;
                 string method = parts[0], path = parts[1];
                 int q = path.IndexOf('?');
+                string rawQuery = q >= 0 ? path[(q + 1)..] : "";
                 if (q >= 0) path = path[..q];
                 path = Uri.UnescapeDataString(path);   // "%20" → " " for asset filenames with spaces
+                var query = rawQuery.Split('&', StringSplitOptions.RemoveEmptyEntries);
+
+                // CORS preflight — a Flutter (or any browser) client sends OPTIONS before a cross-origin
+                // POST. Answer it with the CORS headers and no body, before auth (browsers omit creds here).
+                if (method == "OPTIONS")
+                {
+                    await WriteAsync(stream, "204 No Content", "text/plain", Array.Empty<byte>());
+                    return;
+                }
 
                 // Device gate: unknown IP/MAC devices get a "request access" flow instead of
                 // the dashboard. They ask once; the captain accepts on the Settings page and
@@ -280,6 +298,45 @@ public sealed class LocalServer : IDisposable
                     return;
                 }
 
+                // Debug: dump every iTach channel + field (reads cached frames — no new iTach traffic).
+                // Reveals data the dashboard doesn't decode, and expands the digital-status words to bits.
+                if (path == "/api/raw" && Itach is not null)
+                {
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes(RawDumpJson(Itach)));
+                    return;
+                }
+
+                // Camera list (name + index) — never exposes raw URLs to remote clients.
+                if (path == "/api/cameras")
+                {
+                    var cams = Cameras ?? Array.Empty<CameraDef>();
+                    var list = cams.Select((c, idx) => new { i = idx, name = string.IsNullOrWhiteSpace(c.Name) ? $"Camera {idx + 1}" : c.Name });
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes(JsonSerializer.Serialize(list)));
+                    return;
+                }
+
+                // Camera snapshot proxy: /api/cam?i=N → fetches camera N's feed server-side and returns one JPEG.
+                // Works for HTTP/HTTPS snapshot URLs and MJPEG streams (extracts the first frame), so the page
+                // just polls this same-origin endpoint — no mixed-content, no CORS, RTSP excluded (needs transcode).
+                if (path == "/api/cam")
+                {
+                    int idx = 0;
+                    var qi = query.FirstOrDefault(l => l.StartsWith("i="));
+                    if (qi is not null) int.TryParse(qi[2..], out idx);
+                    var cams = Cameras ?? Array.Empty<CameraDef>();
+                    if (idx < 0 || idx >= cams.Count || string.IsNullOrWhiteSpace(cams[idx].Url))
+                    {
+                        await WriteAsync(stream, "404 Not Found", "text/plain", Encoding.UTF8.GetBytes("no camera"));
+                        return;
+                    }
+                    var jpeg = await FetchSnapshotAsync(cams[idx].Url);
+                    if (jpeg is null)
+                        await WriteAsync(stream, "502 Bad Gateway", "text/plain", Encoding.UTF8.GetBytes("camera unreachable"));
+                    else
+                        await WriteAsync(stream, "200 OK", "image/jpeg", jpeg);
+                    return;
+                }
+
                 if (path == "/api/av/devices" && Av is not null)
                 {
                     await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes(Av.DevicesJson()));
@@ -330,6 +387,130 @@ public sealed class LocalServer : IDisposable
             got += n;
         }
         return Encoding.UTF8.GetString(body, 0, got);
+    }
+
+    /// <summary>
+    /// Builds a JSON dump of every iTach channel: raw hex + decimal fields, a best-effort decode
+    /// (reconciling the Scheiber/E-Plex GUI field map with the app's verified indices), and a bit
+    /// expansion of the digital-status words so undecoded discrete inputs (bilge, pumps, breakers)
+    /// are visible. Reads cached frames only — sends nothing to the Global Cache.
+    /// </summary>
+    private static string RawDumpJson(Ip2slClient itach)
+    {
+        var chans = itach.SnapshotChannels();
+        var outChans = new List<object>();
+        foreach (var ch in chans.Keys.OrderBy(k => k))
+        {
+            var vals = chans[ch];
+            var fields = new List<object>();
+            for (int i = 0; i < vals.Length; i++)
+            {
+                int v = vals[i];
+                fields.Add(new
+                {
+                    i,
+                    hex = v.ToString("X4"),
+                    dec = v,
+                    bits = Convert.ToString(v & 0xFFFF, 2).PadLeft(16, '0'),
+                    guess = GuessField(ch, i, v),
+                });
+            }
+            outChans.Add(new { channel = ch, count = vals.Length, fields });
+        }
+        return JsonSerializer.Serialize(new
+        {
+            note = "raw iTach channel dump (cached frames; no new iTach traffic). 'guess' = best-effort decode.",
+            channels_seen = chans.Count,
+            channels = outChans,
+        });
+    }
+
+    // Best-effort per-field interpretation. Verified indices come from MqttAgent (live-confirmed);
+    // others are hypotheses from the Scheiber Bloc-7 / E-Plex GUI field map, marked with '?'.
+    private static string GuessField(string ch, int i, int v)
+    {
+        double d10 = v / 10.0;
+        return (ch, i) switch
+        {
+            // CH00 — verified voltages + water; hypothesised amps at odd indices
+            ("00", 2) => $"genset batt {d10:0.0} V (verified)",
+            ("00", 3) => $"? genset batt amps ({v - 512})",
+            ("00", 4) => $"port-engine batt {d10:0.0} V (verified)",
+            ("00", 5) => $"? port-engine batt amps ({v - 512})",
+            ("00", 6) => $"stbd-engine batt {d10:0.0} V (verified)",
+            ("00", 7) => $"? stbd-engine batt amps ({v - 512})",
+            ("00", 8) => $"service batt {d10:0.0} V (verified)",
+            ("00", 9) => $"? service batt amps ({(v - 32768) / 10.0:0.0})",
+            ("00", 10) => $"fresh water port {v}% (verified)",
+            ("00", 11) => $"fresh water stbd {v}% (verified)",
+            ("00", 12) => "? digital-status word 1 (see bits)",
+            ("00", 13) => "? digital-status word 2 (see bits)",
+            ("00", 14) => "? digital-status word 3 (see bits)",
+            ("00", 15) => "? digital-status word 4 (see bits)",
+            // CH01 — SOC / setup / scheiber digital
+            ("01", 0) => $"? service batt SOC {d10:0.0}%",
+            ("01", 1) => "? cabin setup / digital",
+            // CH02 — AC: shore1/shore2/gen verified; inverter hypothesised at 9-11
+            ("02", 0) => $"shore-1 {v} V (verified)",
+            ("02", 1) => $"shore-1 {v} A (verified)",
+            ("02", 2) => $"shore-1 {d10:0.0} Hz (verified)",
+            ("02", 3) => $"shore-2 {v} V (verified)",
+            ("02", 4) => $"shore-2 {v} A (verified)",
+            ("02", 5) => $"shore-2 {d10:0.0} Hz (verified)",
+            ("02", 6) => $"generator {v} V (verified)",
+            ("02", 7) => $"generator {v} A (verified)",
+            ("02", 8) => $"generator {d10:0.0} Hz (verified)",
+            ("02", 9) => $"? inverter {v} V",
+            ("02", 10) => $"? inverter {v} A",
+            ("02", 11) => $"? inverter {d10:0.0} Hz",
+            // CH03 — fuel tanks verified; transfer/time hypothesised
+            ("03", 2) => $"fuel fwd-port {v}% (verified)",
+            ("03", 3) => $"fuel fwd-stbd {v}% (verified)",
+            ("03", 10) => $"fuel aft-port {v}% (verified)",
+            ("03", 11) => $"fuel aft-stbd {v}% (verified)",
+            _ => "",
+        };
+    }
+
+    /// <summary>
+    /// Fetches one JPEG frame from a camera URL. A plain HTTP/HTTPS JPEG snapshot is returned as-is;
+    /// an MJPEG (multipart/x-mixed-replace) stream is read until the first complete JPEG frame
+    /// (SOI 0xFFD8 … EOI 0xFFD9) is found. RTSP is unsupported (returns null — needs a transcoder).
+    /// </summary>
+    internal static async Task<byte[]?> FetchSnapshotAsync(string url)
+    {
+        if (url.StartsWith("rtsp://", StringComparison.OrdinalIgnoreCase)) return null; // browser/WebView can't play RTSP
+        try
+        {
+            using var resp = await CamHttp.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+            if (!resp.IsSuccessStatusCode) return null;
+            var ct = resp.Content.Headers.ContentType?.MediaType ?? "";
+
+            if (ct.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+                return await resp.Content.ReadAsByteArrayAsync();
+
+            // MJPEG (or unknown): scan the stream for the first full JPEG frame.
+            await using var s = await resp.Content.ReadAsStreamAsync();
+            var buf = new byte[64 * 1024];
+            var acc = new List<byte>(128 * 1024);
+            int start = -1;
+            int total = 0;
+            while (total < 4 * 1024 * 1024) // 4 MB safety cap
+            {
+                int n = await s.ReadAsync(buf);
+                if (n <= 0) break;
+                total += n;
+                for (int i = 0; i < n; i++) acc.Add(buf[i]);
+                for (int i = 1; i < acc.Count; i++)
+                {
+                    if (start < 0 && acc[i - 1] == 0xFF && acc[i] == 0xD8) start = i - 1;
+                    else if (start >= 0 && acc[i - 1] == 0xFF && acc[i] == 0xD9)
+                        return acc.GetRange(start, i - start + 1).ToArray();
+                }
+            }
+            return null;
+        }
+        catch { return null; }
     }
 
     private void HandleCommand(string json)
@@ -440,7 +621,9 @@ setInterval(poll,3000);
     private async Task WriteAsync(NetworkStream stream, string status, string contentType, byte[] body)
     {
         var header = $"HTTP/1.1 {status}\r\nContent-Type: {contentType}\r\nContent-Length: {body.Length}\r\n" +
-                     "Access-Control-Allow-Origin: *\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
+                     "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\n" +
+                     "Access-Control-Allow-Headers: Content-Type, Authorization\r\n" +
+                     "Cache-Control: no-store\r\nConnection: close\r\n\r\n";
         var head = Encoding.ASCII.GetBytes(header);
         await stream.WriteAsync(head, _cts.Token);
         await stream.WriteAsync(body, _cts.Token);

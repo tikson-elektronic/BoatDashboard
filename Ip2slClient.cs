@@ -43,6 +43,14 @@ public sealed class Ip2slClient : IDisposable
         return null;
     }
 
+    /// <summary>
+    /// Snapshot of every channel currently captured from the iTach (channel → field array).
+    /// Reads the already-open connection's cached frames — issues NO new traffic to the
+    /// Global Cache. Used by the /api/raw debug dump to reveal undecoded data.
+    /// </summary>
+    public IReadOnlyDictionary<string, int[]> SnapshotChannels()
+        => _channels.ToDictionary(kv => kv.Key, kv => (int[])kv.Value.Clone());
+
     /// <summary>Send a 4-byte little-endian command code (sent 3x, like the app).</summary>
     public async Task SendCommandAsync(uint code)
     {

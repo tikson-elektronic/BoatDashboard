@@ -31,6 +31,15 @@ public sealed class AppSettings
     public string LanUser { get; set; } = "";
     public string LanPass { get; set; } = "";
 
+    /// <summary>Auto-start a Cloudflare quick tunnel so the dashboard is reachable from the internet.
+    /// Off by default — a tunnel exposes the boat publicly (login-gated). URL is ephemeral.</summary>
+    public bool EnableCloudflareTunnel { get; set; } = false;
+
+    /// <summary>NMEA 2000 gateway (YachtDevices/Actisense) TCP address for navigation + engine data.
+    /// Empty = no gateway; the navigation/engine pages keep demo/last values.</summary>
+    public string NmeaHost { get; set; } = "";
+    public int NmeaPort { get; set; } = 2000;
+
     /// <summary>
     /// LAN dashboard access allowlist: IP addresses and/or MAC addresses, one entry each.
     /// Empty list = every device on the LAN is allowed. Loopback is always allowed.

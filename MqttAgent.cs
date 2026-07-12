@@ -101,6 +101,21 @@ public sealed class MqttAgent : IAsyncDisposable
         }
     }
 
+    /// <summary>Publishes a navigation/engine scalar from the NMEA 2000 gateway (e.g. navigation/sog).</summary>
+    public Task PublishNavAsync(string name, double value, string unit)
+    {
+        var payload = JsonSerializer.Serialize(new { value = Math.Round(value, 2), unit, timestamp = NowMs() });
+        return PublishAsync($"{Base}/navigation/{name}", payload, retain: true);
+    }
+
+    /// <summary>Publishes a YOLO visual-sensor detection (e.g. vision/aft-deck/person = confidence).</summary>
+    public Task PublishVisionAsync(string cam, string label, double confidence)
+    {
+        string slug(string s) => new string(s.ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) ? c : '-').ToArray()).Trim('-');
+        var payload = JsonSerializer.Serialize(new { value = Math.Round(confidence, 3), unit = "conf", timestamp = NowMs() });
+        return PublishAsync($"{Base}/vision/{slug(cam)}/{slug(label)}", payload, retain: false);
+    }
+
     private async Task PublishAsync(string topic, string payload, bool retain)
     {
         if (_client is not { IsConnected: true }) return;
@@ -187,6 +202,11 @@ public sealed class MqttAgent : IAsyncDisposable
         if (F("00", 6) is int bse) yield return ("electrical", "battery-stbd-engine", bse / 10.0, "V");
         if (F("00", 8) is int bsv) yield return ("electrical", "battery-service", bsv / 10.0, "V");
 
+        // Battery charge/discharge current (A) — Scheiber/E-Plex transform (value − 512), confirmed live on the raw dump.
+        if (F("00", 3) is int ag) yield return ("electrical", "battery-genset-amps", ag - 512, "A");
+        if (F("00", 5) is int ape) yield return ("electrical", "battery-port-engine-amps", ape - 512, "A");
+        if (F("00", 7) is int ase) yield return ("electrical", "battery-stbd-engine-amps", ase - 512, "A");
+
         // AC — channel 02: Shore 1 / Shore 2 / Generator (V, A, Hz÷10)
         if (F("02", 0) is int s1v) yield return ("electrical", "shore-1-volts", s1v, "V");
         if (F("02", 1) is int s1a) yield return ("electrical", "shore-1-amps", s1a, "A");
@@ -197,6 +217,15 @@ public sealed class MqttAgent : IAsyncDisposable
         if (F("02", 6) is int gv) yield return ("electrical", "generator-volts", gv, "V");
         if (F("02", 7) is int ga) yield return ("electrical", "generator-amps", ga, "A");
         if (F("02", 8) is int gh) yield return ("electrical", "generator-hz", gh / 10.0, "Hz");
+
+        // Inverter AC output — channel 02 fields 9-11 (V, A, Hz÷10); confirmed present on the raw dump (49.9 Hz reference).
+        if (F("02", 9) is int iv) yield return ("electrical", "inverter-volts", iv, "V");
+        if (F("02", 10) is int ia) yield return ("electrical", "inverter-amps", ia, "A");
+        if (F("02", 11) is int ih) yield return ("electrical", "inverter-hz", ih / 10.0, "Hz");
+
+        // Fuel transfer — channel 03 fields 8-9 (litres to transfer / to go).
+        if (F("03", 8) is int ftt) yield return ("tanks", "fuel-to-transfer", ftt, "L");
+        if (F("03", 9) is int ftg) yield return ("tanks", "fuel-to-go", ftg, "L");
     }
 
     private async Task OnMessageAsync(MqttApplicationMessageReceivedEventArgs e)

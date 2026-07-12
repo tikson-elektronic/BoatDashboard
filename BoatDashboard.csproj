@@ -18,6 +18,7 @@
     <PackageReference Include="System.Management" Version="9.0.0" />
     <PackageReference Include="Makaretu.Dns.Multicast" Version="0.27.0" />
     <PackageReference Include="System.Speech" Version="9.0.0" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" />
   </ItemGroup>
 
   <ItemGroup>
@@ -26,5 +27,12 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
+
+  <!-- ONNX Runtime ships its native lib under runtimes/win-x64/native; an AnyCPU app on x64
+       needs it next to the exe so the loader finds it (requires the VC++ 2015-2022 x64 redist). -->
+  <Target Name="CopyOnnxNative" AfterTargets="Build">
+    <Copy SourceFiles="$(OutDir)runtimes\win-x64\native\onnxruntime.dll;$(OutDir)runtimes\win-x64\native\onnxruntime_providers_shared.dll"
+          DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" ContinueOnError="true" />
+  </Target>
 
 </Project>

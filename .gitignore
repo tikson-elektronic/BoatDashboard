@@ -14,3 +14,7 @@ appsettings.local.json
 .idea/
 Thumbs.db
 .DS_Store
+
+# YOLO model (drop-in, not versioned)
+*.onnx
+*.pt
