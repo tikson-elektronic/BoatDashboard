@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Text;
@@ -30,6 +32,7 @@ public sealed class AvDevice
     public string Psk { get; set; } = "0000";        // Sony IP-control pre-shared key (set the same on the TV)
     public string? ClientKey { get; set; }           // LG webOS pairing key / Samsung token, persisted after first pair
     public string? SamsungAppName { get; set; }      // the name shown in the TV's Allow prompt / device list
+    public string? Mac { get; set; }                 // hardware MAC, for Wake-on-LAN power-on
     public bool Online => (DateTime.UtcNow - LastSeen).TotalSeconds < 150;   // watched: 3 missed scans
 }
 
@@ -45,6 +48,63 @@ public sealed class AvService
     private readonly Dictionary<string, AvDevice> _devices = new();
     private readonly object _lock = new();
     private CancellationTokenSource? _scanCts;
+
+    // Persisted pairing tokens (Samsung/LG), so a device stays paired across restarts.
+    private static readonly string TokenFile = @"C:\voms\av-tokens.json";
+    private static readonly Dictionary<string, string> _tokens = LoadTokens();
+    private static Dictionary<string, string> LoadTokens()
+    {
+        try { if (File.Exists(TokenFile)) return JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(TokenFile)) ?? new(); }
+        catch { }
+        return new();
+    }
+    internal static string? GetToken(string id) => _tokens.TryGetValue(id, out var t) ? t : null;
+    internal static void SaveToken(string id, string token)
+    {
+        try
+        {
+            lock (_tokens) { _tokens[id] = token; Directory.CreateDirectory(Path.GetDirectoryName(TokenFile)!); File.WriteAllText(TokenFile, JsonSerializer.Serialize(_tokens)); }
+        }
+        catch { }
+    }
+
+    [DllImport("iphlpapi.dll", ExactSpelling = true)]
+    private static extern int SendARP(uint destIp, uint srcIp, byte[] macAddr, ref int macLen);
+    /// <summary>Best-effort MAC lookup for an IP via the ARP cache (fallback when we didn't read it from the device).</summary>
+    private static string? ArpLookup(string ip)
+    {
+        try
+        {
+            var bytes = IPAddress.Parse(ip).GetAddressBytes();
+            uint dest = BitConverter.ToUInt32(bytes, 0);
+            var mac = new byte[6]; int len = 6;
+            if (SendARP(dest, 0, mac, ref len) == 0 && len == 6 && mac.Any(b => b != 0))
+                return string.Concat(mac.Select(b => b.ToString("X2")));
+        }
+        catch { }
+        return null;
+    }
+
+    /// <summary>Sends a Wake-on-LAN magic packet to power on a device that's fully off (e.g. a Samsung TV,
+    /// which can't be woken by its WebSocket API once asleep). Broadcasts on the LAN to the given MAC.</summary>
+    public static bool WakeOnLan(string? mac)
+    {
+        var m = (mac ?? "").Replace(":", "").Replace("-", "").Replace(".", "");
+        if (m.Length != 12) return false;
+        try
+        {
+            var macBytes = Enumerable.Range(0, 6).Select(i => Convert.ToByte(m.Substring(i * 2, 2), 16)).ToArray();
+            var packet = new byte[102];
+            for (int i = 0; i < 6; i++) packet[i] = 0xFF;
+            for (int i = 1; i <= 16; i++) Array.Copy(macBytes, 0, packet, i * 6, 6);
+            using var udp = new UdpClient { EnableBroadcast = true };
+            udp.Send(packet, packet.Length, new IPEndPoint(IPAddress.Broadcast, 9));
+            udp.Send(packet, packet.Length, new IPEndPoint(IPAddress.Broadcast, 7));
+            Ip2slClient.Log($"[av] Wake-on-LAN sent to {m}");
+            return true;
+        }
+        catch (Exception ex) { Ip2slClient.Log("[av] WoL failed: " + ex.Message); return false; }
+    }
 
     public IReadOnlyList<AvDevice> Devices { get { lock (_lock) return _devices.Values.OrderBy(d => d.Name).ToList(); } }
 
@@ -93,25 +153,33 @@ public sealed class AvService
             "sonos" or "upnp" => "speaker",
             _ => "media",
         };
-        if (string.IsNullOrWhiteSpace(name) && protocol == "samsung")
+        string? mac = null;
+        if (protocol == "samsung")
         {
             try
             {
                 using var doc = JsonDocument.Parse(await Http.GetStringAsync($"http://{ip}:8001/api/v2/"));
                 if (doc.RootElement.TryGetProperty("device", out var dev))
-                    name = dev.TryGetProperty("name", out var n) ? n.GetString() : dev.TryGetProperty("modelName", out var m) ? m.GetString() : null;
+                {
+                    if (string.IsNullOrWhiteSpace(name))
+                        name = dev.TryGetProperty("name", out var n) ? n.GetString() : dev.TryGetProperty("modelName", out var m) ? m.GetString() : null;
+                    mac = dev.TryGetProperty("wifiMac", out var wm) ? wm.GetString() : (dev.TryGetProperty("mac", out var mm) ? mm.GetString() : null);
+                }
             }
             catch { }
         }
+        var id = $"{ip}:{protocol}";
         var d = new AvDevice
         {
-            Id = $"{ip}:{protocol}",
+            Id = id,
             Ip = ip,
             Name = string.IsNullOrWhiteSpace(name) ? $"{protocol.ToUpperInvariant()} {ip}" : name!,
             Type = type,
             Protocol = protocol,
             NeedsPairing = protocol is "samsung" or "lg",
             Accepted = true,
+            Mac = mac,
+            ClientKey = GetToken(id),   // restore a previously-saved pairing token so it stays paired
         };
         Upsert(d, background: false);
         return d;
@@ -476,10 +544,60 @@ public sealed class AvService
     {
         var keys = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["power"] = "KEY_POWER", ["vol_up"] = "KEY_VOLUP", ["vol_down"] = "KEY_VOLDOWN", ["mute"] = "KEY_MUTE",
+            // power / volume
+            ["power"] = "KEY_POWER", ["power_off"] = "KEY_POWER", ["vol_up"] = "KEY_VOLUP", ["vol_down"] = "KEY_VOLDOWN", ["mute"] = "KEY_MUTE",
+            // navigation
             ["home"] = "KEY_HOME", ["up"] = "KEY_UP", ["down"] = "KEY_DOWN", ["left"] = "KEY_LEFT", ["right"] = "KEY_RIGHT",
-            ["select"] = "KEY_ENTER", ["back"] = "KEY_RETURN", ["play"] = "KEY_PLAY", ["pause"] = "KEY_PAUSE",
+            ["select"] = "KEY_ENTER", ["ok"] = "KEY_ENTER", ["back"] = "KEY_RETURN", ["exit"] = "KEY_EXIT",
+            // menus / settings / info
+            ["menu"] = "KEY_MENU", ["settings"] = "KEY_MENU", ["tools"] = "KEY_TOOLS", ["info"] = "KEY_INFO",
+            ["guide"] = "KEY_GUIDE", ["smarthub"] = "KEY_HOME",
+            // channels
+            ["ch_up"] = "KEY_CHUP", ["channel_up"] = "KEY_CHUP", ["ch_down"] = "KEY_CHDOWN", ["channel_down"] = "KEY_CHDOWN",
+            ["ch_list"] = "KEY_CH_LIST",
+            // inputs / source
+            ["source"] = "KEY_SOURCE", ["input"] = "KEY_SOURCE", ["hdmi"] = "KEY_HDMI",
+            ["hdmi1"] = "KEY_HDMI1", ["hdmi2"] = "KEY_HDMI2", ["hdmi3"] = "KEY_HDMI3", ["hdmi4"] = "KEY_HDMI4",
+            ["tv"] = "KEY_TV",
+            // transport
+            ["play"] = "KEY_PLAY", ["pause"] = "KEY_PAUSE", ["stop"] = "KEY_STOP", ["rewind"] = "KEY_REWIND", ["ff"] = "KEY_FF",
+            // number pad
+            ["0"] = "KEY_0", ["1"] = "KEY_1", ["2"] = "KEY_2", ["3"] = "KEY_3", ["4"] = "KEY_4",
+            ["5"] = "KEY_5", ["6"] = "KEY_6", ["7"] = "KEY_7", ["8"] = "KEY_8", ["9"] = "KEY_9",
+            // colour keys
+            ["red"] = "KEY_RED", ["green"] = "KEY_GREEN", ["yellow"] = "KEY_YELLOW", ["blue"] = "KEY_BLUE",
         };
+
+        // Power ON a TV that's fully off — the WebSocket API can't wake it (its network is asleep),
+        // so send a Wake-on-LAN magic packet to its MAC. "power" (toggle) still uses KEY_POWER below.
+        if (action is "power_on" or "wake" or "on")
+        {
+            var mac = d.Mac;
+            if (string.IsNullOrEmpty(mac)) mac = ArpLookup(d.Ip);   // fall back to ARP if we didn't capture it
+            return WakeOnLan(mac)
+                ? "Samsung: Wake-on-LAN sent — the TV should power on."
+                : "Samsung: no MAC known for Wake-on-LAN. Re-add the TV while it's on so I can read its MAC.";
+        }
+
+        // App launch (Netflix, YouTube, …) — Tizen launches apps via a REST call, not a keypress.
+        var apps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["netflix"] = "11101200001", ["youtube"] = "111299001912", ["prime"] = "3201512006785",
+            ["primevideo"] = "3201512006785", ["disney"] = "3201901017640", ["disneyplus"] = "3201901017640",
+            ["spotify"] = "3201606009684", ["hbo"] = "3201601007230", ["hbomax"] = "3201601007230",
+            ["appletv"] = "3201807016597", ["plex"] = "3201512006963", ["twitch"] = "3202203026841",
+        };
+        if (apps.TryGetValue(action, out var appId))
+        {
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Post, $"http://{d.Ip}:8001/api/v2/applications/{appId}");
+                var r = await Http.SendAsync(req);
+                return r.IsSuccessStatusCode ? $"Samsung: launched {action}." : $"Samsung: launch {action} returned {(int)r.StatusCode} (some Tizen firmware blocks REST app-launch).";
+            }
+            catch (Exception ex) { return $"Samsung: launch {action} failed — {ex.Message}"; }
+        }
+
         if (!keys.TryGetValue(action, out var key)) return $"Samsung: unknown action '{action}'.";
         // Use a stable per-device app name. If we've never paired, and one was tried before, the TV may
         // remember it as denied and refuse (ms.channel.timeOut) — so pick a fresh name until paired.
@@ -533,7 +651,7 @@ public sealed class AvService
                     var root = doc.RootElement;
                     var ev = root.TryGetProperty("event", out var e) ? e.GetString() : "";
                     if (root.TryGetProperty("data", out var data) && data.TryGetProperty("token", out var tok) && tok.GetString() is { Length: > 0 } t)
-                    { d.ClientKey = t; break; }                        // accepted → token issued
+                    { d.ClientKey = t; SaveToken(d.Id, t); break; }    // accepted → token issued (persist it)
                     if (ev == "ms.channel.unauthorized") { denied = true; break; }  // user tapped Deny
                     if (ev == "ms.channel.timeOut") { timedOut = true; break; }     // TV refused the secure channel
                     if (hadToken && ev == "ms.channel.connect") break; // already authorised
