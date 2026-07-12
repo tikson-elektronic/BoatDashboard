@@ -26,6 +26,16 @@ public sealed class AppSettings
 
     /// <summary>Whether alarm indicators pulse/blink. When false they show steady.</summary>
     public bool BlinkAlarms { get; set; } = true;
+
+    /// <summary>HTTP Basic Auth for the LAN dashboard (empty user = no login, per user preference).</summary>
+    public string LanUser { get; set; } = "";
+    public string LanPass { get; set; } = "";
+
+    /// <summary>
+    /// LAN dashboard access allowlist: IP addresses and/or MAC addresses, one entry each.
+    /// Empty list = every device on the LAN is allowed. Loopback is always allowed.
+    /// </summary>
+    public List<string> LanAllowList { get; set; } = new();
 }
 
 public static class SettingsStore

@@ -1,6 +1,7 @@
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 
@@ -27,6 +28,16 @@ public sealed class LocalServer : IDisposable
     /// <summary>Invoked for control messages posted by a remote browser: (cmd, code).</summary>
     public Action<string, uint>? OnCommand;
 
+    /// <summary>Expected "Basic &lt;base64(user:pass)&gt;" value, or null when auth is disabled.</summary>
+    private readonly string? _expectedAuth;
+
+    // Device allowlist (IPs + MACs, normalized). Null = open to the whole LAN.
+    private sealed record AllowSets(HashSet<string> Ips, HashSet<string> Macs);
+    private volatile AllowSets? _allow;
+
+    [DllImport("iphlpapi.dll")]
+    private static extern int SendARP(uint destIp, uint srcIp, byte[] macAddr, ref int macLen);
+
     public int Port { get; }
 
     private const string RemoteBridge = @"<link rel=""icon"" type=""image/png"" href=""/uploads/lagoon-logo.png"">
@@ -42,11 +53,55 @@ public sealed class LocalServer : IDisposable
   });
 })();</script>";
 
-    public LocalServer(string webRoot, int port)
+    public LocalServer(string webRoot, int port, string? user = null, string? pass = null)
     {
         _webRoot = webRoot;
         Port = port;
         _listener = new TcpListener(IPAddress.Any, port);
+        if (!string.IsNullOrWhiteSpace(user))
+            _expectedAuth = "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes($"{user}:{pass}"));
+    }
+
+    /// <summary>Replaces the device allowlist (IPs and/or MACs, any separator style). Empty → open.</summary>
+    public void SetAllowList(IEnumerable<string>? entries)
+    {
+        var ips = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var macs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var raw in entries ?? Enumerable.Empty<string>())
+        {
+            var e = raw.Trim();
+            if (e.Length == 0) continue;
+            var hex = e.Replace(":", "").Replace("-", "").Replace(".", "");
+            if (hex.Length == 12 && hex.All(Uri.IsHexDigit)) macs.Add(hex.ToLowerInvariant());
+            else if (IPAddress.TryParse(e, out var ip)) ips.Add(ip.ToString());
+        }
+        _allow = (ips.Count == 0 && macs.Count == 0) ? null : new AllowSets(ips, macs);
+    }
+
+    /// <summary>MAC of a LAN peer via ARP ("aabbccddeeff"), or null if unresolvable.</summary>
+    private static string? MacOf(IPAddress ip)
+    {
+        try
+        {
+            if (ip.AddressFamily != AddressFamily.InterNetwork) return null;
+            var dest = BitConverter.ToUInt32(ip.GetAddressBytes(), 0);
+            var mac = new byte[6];
+            int len = 6;
+            if (SendARP(dest, 0, mac, ref len) != 0 || len < 6) return null;
+            return Convert.ToHexString(mac, 0, 6).ToLowerInvariant();
+        }
+        catch { return null; }
+    }
+
+    /// <summary>True if this client may use the dashboard (loopback always may).</summary>
+    private bool IsAllowed(IPAddress ip, out string? mac)
+    {
+        mac = null;
+        if (_allow is not { } allow) return true;
+        if (IPAddress.IsLoopback(ip)) return true;
+        if (allow.Ips.Contains(ip.ToString())) return true;
+        mac = MacOf(ip);
+        return mac is not null && allow.Macs.Contains(mac);
     }
 
     public void Start()
@@ -73,6 +128,7 @@ public sealed class LocalServer : IDisposable
             using (client)
             {
                 client.NoDelay = true;
+                var remoteIp = (client.Client.RemoteEndPoint as IPEndPoint)?.Address ?? IPAddress.Loopback;
                 using var stream = client.GetStream();
 
                 // Read headers (up to the blank line).
@@ -97,6 +153,42 @@ public sealed class LocalServer : IDisposable
                 int q = path.IndexOf('?');
                 if (q >= 0) path = path[..q];
                 path = Uri.UnescapeDataString(path);   // "%20" → " " for asset filenames with spaces
+
+                // Device allowlist: refuse unknown IP/MAC (after reading the request so the
+                // browser reliably renders the 403 page instead of a reset error).
+                if (!IsAllowed(remoteIp, out var remoteMac))
+                {
+                    var macTxt = remoteMac is null ? "unknown" :
+                        string.Join(":", Enumerable.Range(0, 6).Select(i => remoteMac.Substring(i * 2, 2)));
+                    var deny = Encoding.UTF8.GetBytes(
+                        "<!doctype html><html><body style=\"background:#0a1014;color:#e8f0f2;font-family:sans-serif;" +
+                        "display:flex;align-items:center;justify-content:center;height:100vh;margin:0;\"><div style=\"text-align:center;\">" +
+                        "<h2 style=\"color:#ff4d4f;letter-spacing:2px;\">ACCESS DENIED</h2>" +
+                        "<p>This device is not on the vessel's allowed list.</p>" +
+                        $"<p style=\"color:#7d939e;font-family:monospace;\">IP {remoteIp} &nbsp;·&nbsp; MAC {macTxt}</p>" +
+                        "<p style=\"color:#7d939e;font-size:13px;\">Add it on the dashboard PC: ⚙ SETUP → NETWORK → Allowed devices.</p>" +
+                        "</div></body></html>");
+                    await WriteAsync(stream, "403 Forbidden", "text/html; charset=utf-8", deny);
+                    return;
+                }
+
+                // HTTP Basic Auth (whole site) when configured.
+                if (_expectedAuth is not null)
+                {
+                    string? got = null;
+                    foreach (var l in lines)
+                        if (l.StartsWith("Authorization:", StringComparison.OrdinalIgnoreCase))
+                            got = l[14..].Trim();
+                    if (!string.Equals(got, _expectedAuth, StringComparison.Ordinal))
+                    {
+                        var body401 = Encoding.UTF8.GetBytes("Authentication required.");
+                        var hdr401 = $"HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"BoatDashboard\"\r\n" +
+                                     $"Content-Type: text/plain\r\nContent-Length: {body401.Length}\r\nConnection: close\r\n\r\n";
+                        await stream.WriteAsync(Encoding.ASCII.GetBytes(hdr401), _cts.Token);
+                        await stream.WriteAsync(body401, _cts.Token);
+                        return;
+                    }
+                }
 
                 if (method == "POST" && path == "/api/cmd")
                 {

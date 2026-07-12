@@ -169,7 +169,8 @@ window.addEventListener('DOMContentLoaded', function(){
     {
         try
         {
-            _server = new LocalServer(webDir, HttpPort);
+            _server = new LocalServer(webDir, HttpPort, _settings.LanUser, _settings.LanPass);
+            _server.SetAllowList(_settings.LanAllowList);
             // Route remote-browser commands through the same handler as the WebView2 bridge.
             _server.OnCommand = (cmd, code) => Dispatcher.BeginInvoke(() => RunCommand(cmd, code));
             _server.Start();
@@ -360,6 +361,7 @@ window.addEventListener('DOMContentLoaded', function(){
             ApplyKiosk();
             ApplyBlink();
             ApplyAssistant();
+            _server?.SetAllowList(_settings.LanAllowList);   // takes effect immediately
         }
     }
 }

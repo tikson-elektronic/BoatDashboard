@@ -27,6 +27,7 @@ public partial class SettingsWindow : Window
         HardwareIdText.Text = "Hardware ID: " + PairingService.HardwareId;
         NetUrlText.Text = $"http://{LocalServer.LocalIPv4()}:{ShellWindow.HttpPort}";
         NetDiscoveryText.Text = "Discovery (mDNS / Bonjour): BoatDashboard._http._tcp.local";
+        AllowListBox.Text = string.Join(Environment.NewLine, settings.LanAllowList);
         RefreshPairingUi();
         LoadLogs();
 
@@ -135,6 +136,11 @@ public partial class SettingsWindow : Window
         Settings.Kiosk = KioskCheck.IsChecked == true;
         Settings.LaunchAtBoot = BootCheck.IsChecked == true;
         Settings.BlinkAlarms = BlinkCheck.IsChecked == true;
+        Settings.LanAllowList = AllowListBox.Text
+            .Split('\n')
+            .Select(l => l.Trim().TrimEnd('\r'))
+            .Where(l => l.Length > 0)
+            .ToList();
 
         SetLaunchAtBoot(Settings.LaunchAtBoot);
         SettingsStore.Save(Settings);
