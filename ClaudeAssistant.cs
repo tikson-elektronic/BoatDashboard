@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Anthropic;
@@ -21,7 +22,10 @@ public sealed class ClaudeAssistant
         "You are the onboard AI assistant for a Lagoon 630 motor yacht. You have live access via tools: " +
         "get_status returns tank levels, battery voltages, and AC (shore/generator) readings; " +
         "get_pc_status returns the onboard PC's CPU load/temperature, LAN dashboard URL, and hardware-link state; " +
-        "control_lights switches lights. Use get_status before answering questions about current state. " +
+        "control_lights switches lights; run_powershell runs any PowerShell command on the onboard PC with the " +
+        "dashboard's Administrator privileges (use it for diagnostics, files, networking, and maintenance the " +
+        "captain asks for — be careful, and never reboot/shut down or delete data unless explicitly told). " +
+        "Use get_status before answering questions about current state. " +
         "When the user asks to turn lights on/off, call control_lights. Be concise and direct — answer in a " +
         "sentence or two, no preamble. Use plain text, no markdown headers. Replies may be read aloud by " +
         "text-to-speech, so keep them natural to hear. Flag anything that looks unsafe " +
@@ -38,6 +42,26 @@ public sealed class ClaudeAssistant
             {
                 Properties = new Dictionary<string, JsonElement>(),
                 Required = [],
+            },
+        },
+        new Tool
+        {
+            Name = "run_powershell",
+            Description = "Run a PowerShell command on the onboard PC and return its output. " +
+                          "Runs with the dashboard's privileges (Administrator). Use for diagnostics, " +
+                          "file/network/system checks, and maintenance the captain asks for. " +
+                          "Be careful with destructive commands; never reboot or shut down unless explicitly asked.",
+            InputSchema = new()
+            {
+                Properties = new Dictionary<string, JsonElement>
+                {
+                    ["command"] = JsonSerializer.SerializeToElement(new
+                    {
+                        type = "string",
+                        description = "The PowerShell command to execute.",
+                    }),
+                },
+                Required = ["command"],
             },
         },
         new Tool
@@ -131,6 +155,13 @@ public sealed class ClaudeAssistant
             case "get_status":
                 return _vm.StatusJson();
 
+            case "run_powershell":
+                string psCmd = "";
+                try { psCmd = JsonSerializer.SerializeToElement(input).GetProperty("command").GetString() ?? ""; }
+                catch { }
+                if (string.IsNullOrWhiteSpace(psCmd)) return "No command provided.";
+                return await RunPowerShellAsync(psCmd);
+
             case "get_pc_status":
                 return JsonSerializer.Serialize(new
                 {
@@ -165,5 +196,43 @@ public sealed class ClaudeAssistant
             default:
                 return $"Unknown tool '{name}'.";
         }
+    }
+
+    /// <summary>Runs a PowerShell command on the onboard PC (with the dashboard's privileges).</summary>
+    private static async Task<string> RunPowerShellAsync(string command)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add("-NoProfile");
+            psi.ArgumentList.Add("-NonInteractive");
+            psi.ArgumentList.Add("-ExecutionPolicy");
+            psi.ArgumentList.Add("Bypass");
+            psi.ArgumentList.Add("-Command");
+            psi.ArgumentList.Add(command);
+
+            using var proc = Process.Start(psi);
+            if (proc is null) return "Failed to start PowerShell.";
+
+            var outTask = proc.StandardOutput.ReadToEndAsync();
+            var errTask = proc.StandardError.ReadToEndAsync();
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+            try { await proc.WaitForExitAsync(cts.Token); }
+            catch (OperationCanceledException) { try { proc.Kill(true); } catch { } return "Command timed out (90 s)."; }
+
+            var stdout = await outTask;
+            var stderr = await errTask;
+            var result = (stdout + (stderr.Length > 0 ? "\n[stderr]\n" + stderr : "")).Trim();
+            if (result.Length == 0) result = $"(no output; exit code {proc.ExitCode})";
+            return result.Length > 6000 ? result[..6000] + "\n…(truncated)" : result;
+        }
+        catch (Exception ex) { return "PowerShell error: " + ex.Message; }
     }
 }
