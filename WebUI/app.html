@@ -1443,7 +1443,11 @@ function dialPosNow(){
   if(maxX<8||maxY<12)return center;
   return {x:Math.min(Math.max(_dialPos.x,8),maxX), y:Math.min(Math.max(_dialPos.y,12),maxY)};
 }
+var _navToggleTs=0;
 function navToggle(){
+  // Debounce: iOS can fire touch + a synthesised click for one tap, which would open then instantly
+  // close the menu (looks like "the menu doesn't work"). Ignore repeat calls within 450 ms.
+  var now=Date.now(); if(now-_navToggleTs<450)return; _navToggleTs=now;
   S.navOpen=!S.navOpen;
   if(S.navOpen){
     var idx=0;NAV.forEach(function(n,i){if(n[0]===S.screen)idx=i;});
@@ -1584,7 +1588,21 @@ window.camApply=function(list){try{S.camList=(typeof list==="string")?JSON.parse
 // YOLO detections for camera i (from the onboard vision service) — drawn as boxes on the feed.
 window.camDetections=function(i,dets){S.camDets=S.camDets||{};try{S.camDets[i]=(typeof dets==="string")?JSON.parse(dets):(dets||[]);}catch(e){S.camDets[i]=[];}if(S.screen==="cameras")render();};
 // Snapshot polling: refresh each visible feed <img> in place (no full re-render → no flicker) every 2 s.
-setInterval(function(){if(S.screen!=="cameras")return;if(!(S.camList&&S.camList.length))return;var t=Date.now();S.camTick=t;var els=document.querySelectorAll("[data-cam]");for(var i=0;i<els.length;i++){els[i].src="/api/cam?i="+els[i].getAttribute("data-cam")+"&t="+t;}},2000);
+// Snapshot polling: refresh each feed only once the previous frame has loaded, so a slow proxy
+// fetch is never replaced mid-load (which left the tile blank). Interval 4s.
+setInterval(function(){
+  if(S.screen!=="cameras")return; if(!(S.camList&&S.camList.length))return;
+  var t=Date.now(); S.camTick=t;
+  var els=document.querySelectorAll("[data-cam]");
+  for(var i=0;i<els.length;i++){
+    var im=els[i];
+    if(im.__loading)continue;                    // still fetching the last frame — don't stomp it
+    im.__loading=true;
+    im.onload=function(){this.__loading=false;this.style.opacity=1;};
+    im.onerror=function(){this.__loading=false;this.style.opacity=0;};
+    im.src="/api/cam?i="+im.getAttribute("data-cam")+"&t="+t;
+  }
+},4000);
 // Remote (LAN browser) fetches the list itself; the WebView gets it pushed via camApply.
 if(window.__remote){fetch("/api/cameras").then(function(r){return r.json();}).then(function(d){window.camApply(d);}).catch(function(){});}
 function engToggle(){S.engines.running=!S.engines.running;render();}
