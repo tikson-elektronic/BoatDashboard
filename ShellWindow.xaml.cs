@@ -354,7 +354,7 @@ window.addEventListener('DOMContentLoaded', function(){
 
     private void OpenSettings()
     {
-        var dlg = new SettingsWindow(_settings) { Owner = this };
+        var dlg = new SettingsWindow(_settings, _server) { Owner = this };
         if (dlg.ShowDialog() == true)
         {
             _settings = dlg.Settings;

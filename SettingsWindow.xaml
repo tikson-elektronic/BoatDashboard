@@ -110,10 +110,13 @@
                            FontWeight="SemiBold" FontFamily="Consolas" Margin="2,4,0,0"/>
                 <TextBlock x:Name="NetDiscoveryText" Text="" Foreground="{StaticResource MutedBrush}"
                            FontSize="11" Margin="2,4,0,0" TextWrapping="Wrap"/>
-                <TextBlock Text="Allowed devices — one IP or MAC address per line. Leave EMPTY to allow every device on the LAN. Denied devices see their IP/MAC on the block page."
+                <TextBlock Text="Allowed devices — one IP or MAC per line. New devices must request access (they get a pairing page) and appear below for approval; accepting adds their MAC automatically."
                            Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="2,12,0,4" TextWrapping="Wrap"/>
                 <TextBox x:Name="AllowListBox" AcceptsReturn="True" Height="92" FontFamily="Consolas" FontSize="13"
                          VerticalScrollBarVisibility="Auto" TextWrapping="NoWrap"/>
+                <TextBlock Text="Connection requests" Foreground="{StaticResource MutedBrush}" FontSize="11"
+                           FontWeight="SemiBold" Margin="2,12,0,4"/>
+                <StackPanel x:Name="ReqPanel"/>
 
                 <Grid Margin="0,20,0,2">
                     <Grid.ColumnDefinitions>

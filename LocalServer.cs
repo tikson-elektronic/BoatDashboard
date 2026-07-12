@@ -31,9 +31,33 @@ public sealed class LocalServer : IDisposable
     /// <summary>Expected "Basic &lt;base64(user:pass)&gt;" value, or null when auth is disabled.</summary>
     private readonly string? _expectedAuth;
 
-    // Device allowlist (IPs + MACs, normalized). Null = open to the whole LAN.
+    // Device allowlist (IPs + MACs, normalized). Unknown devices must request access.
     private sealed record AllowSets(HashSet<string> Ips, HashSet<string> Macs);
-    private volatile AllowSets? _allow;
+    private volatile AllowSets _allow = new(new(StringComparer.OrdinalIgnoreCase), new(StringComparer.OrdinalIgnoreCase));
+
+    /// <summary>A device asking to be let in (keyed by MAC when known, else IP).</summary>
+    public sealed class AccessRequest
+    {
+        public required string Key { get; init; }
+        public required string Ip { get; init; }
+        public string? Mac { get; init; }
+        public string Name { get; set; } = "";
+        public DateTime At { get; set; } = DateTime.Now;
+        /// <summary>0 = pending, 1 = approved, 2 = denied.</summary>
+        public int Status { get; set; }
+    }
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, AccessRequest> _requests = new();
+
+    /// <summary>Pending connection requests, newest first (for the Settings page).</summary>
+    public IReadOnlyList<AccessRequest> PendingRequests =>
+        _requests.Values.Where(r => r.Status == 0).OrderByDescending(r => r.At).ToList();
+
+    /// <summary>Marks a request approved/denied. The caller persists the allowlist itself.</summary>
+    public void ResolveRequest(string key, bool approve)
+    {
+        if (_requests.TryGetValue(key, out var r)) r.Status = approve ? 1 : 2;
+    }
 
     [DllImport("iphlpapi.dll")]
     private static extern int SendARP(uint destIp, uint srcIp, byte[] macAddr, ref int macLen);
@@ -75,7 +99,7 @@ public sealed class LocalServer : IDisposable
             if (hex.Length == 12 && hex.All(Uri.IsHexDigit)) macs.Add(hex.ToLowerInvariant());
             else if (IPAddress.TryParse(e, out var ip)) ips.Add(ip.ToString());
         }
-        _allow = (ips.Count == 0 && macs.Count == 0) ? null : new AllowSets(ips, macs);
+        _allow = new AllowSets(ips, macs);
     }
 
     /// <summary>MAC of a LAN peer via ARP ("aabbccddeeff"), or null if unresolvable.</summary>
@@ -97,9 +121,9 @@ public sealed class LocalServer : IDisposable
     private bool IsAllowed(IPAddress ip, out string? mac)
     {
         mac = null;
-        if (_allow is not { } allow) return true;
         if (IPAddress.IsLoopback(ip)) return true;
-        if (allow.Ips.Contains(ip.ToString())) return true;
+        var allow = _allow;
+        if (allow.Ips.Contains(ip.ToString())) { mac = MacOf(ip); return true; }
         mac = MacOf(ip);
         return mac is not null && allow.Macs.Contains(mac);
     }
@@ -154,21 +178,56 @@ public sealed class LocalServer : IDisposable
                 if (q >= 0) path = path[..q];
                 path = Uri.UnescapeDataString(path);   // "%20" → " " for asset filenames with spaces
 
-                // Device allowlist: refuse unknown IP/MAC (after reading the request so the
-                // browser reliably renders the 403 page instead of a reset error).
+                // Device gate: unknown IP/MAC devices get a "request access" flow instead of
+                // the dashboard. They ask once; the captain accepts on the Settings page and
+                // the device's MAC is added to the allowlist automatically.
                 if (!IsAllowed(remoteIp, out var remoteMac))
                 {
-                    var macTxt = remoteMac is null ? "unknown" :
-                        string.Join(":", Enumerable.Range(0, 6).Select(i => remoteMac.Substring(i * 2, 2)));
-                    var deny = Encoding.UTF8.GetBytes(
-                        "<!doctype html><html><body style=\"background:#0a1014;color:#e8f0f2;font-family:sans-serif;" +
-                        "display:flex;align-items:center;justify-content:center;height:100vh;margin:0;\"><div style=\"text-align:center;\">" +
-                        "<h2 style=\"color:#ff4d4f;letter-spacing:2px;\">ACCESS DENIED</h2>" +
-                        "<p>This device is not on the vessel's allowed list.</p>" +
-                        $"<p style=\"color:#7d939e;font-family:monospace;\">IP {remoteIp} &nbsp;·&nbsp; MAC {macTxt}</p>" +
-                        "<p style=\"color:#7d939e;font-size:13px;\">Add it on the dashboard PC: ⚙ SETUP → NETWORK → Allowed devices.</p>" +
-                        "</div></body></html>");
-                    await WriteAsync(stream, "403 Forbidden", "text/html; charset=utf-8", deny);
+                    var reqKey = remoteMac ?? remoteIp.ToString();
+
+                    if (method == "POST" && path == "/api/request-access")
+                    {
+                        int rlen = 0;
+                        foreach (var l in lines)
+                            if (l.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase))
+                                int.TryParse(l[15..].Trim(), out rlen);
+                        var rbody = new byte[Math.Clamp(rlen, 0, 4096)];
+                        int rgot = 0;
+                        while (rgot < rbody.Length)
+                        {
+                            int n = await stream.ReadAsync(rbody.AsMemory(rgot), _cts.Token);
+                            if (n == 0) break;
+                            rgot += n;
+                        }
+                        var devName = "";
+                        try
+                        {
+                            using var rdoc = JsonDocument.Parse(Encoding.UTF8.GetString(rbody, 0, rgot));
+                            devName = rdoc.RootElement.TryGetProperty("name", out var dn) ? dn.GetString() ?? "" : "";
+                        }
+                        catch { }
+                        var req = _requests.GetOrAdd(reqKey, _ => new AccessRequest
+                            { Key = reqKey, Ip = remoteIp.ToString(), Mac = remoteMac });
+                        req.Name = devName.Length > 0 ? devName[..Math.Min(40, devName.Length)] : req.Name;
+                        req.At = DateTime.Now;
+                        if (req.Status == 2) req.Status = 0;   // let a denied device ask again
+                        await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes("{\"ok\":true}"));
+                        return;
+                    }
+
+                    if (path == "/api/request-status")
+                    {
+                        var st = _requests.TryGetValue(reqKey, out var r)
+                            ? (r.Status == 1 ? "approved" : r.Status == 2 ? "denied" : "pending")
+                            : "none";
+                        await WriteAsync(stream, "200 OK", "application/json",
+                            Encoding.UTF8.GetBytes($"{{\"status\":\"{st}\"}}"));
+                        return;
+                    }
+
+                    await WriteAsync(stream, "200 OK", "text/html; charset=utf-8",
+                        Encoding.UTF8.GetBytes(RequestPage(remoteIp.ToString(), remoteMac,
+                            _requests.TryGetValue(reqKey, out var existing) ? existing.Status : -1)));
                     return;
                 }
 
@@ -258,6 +317,60 @@ public sealed class LocalServer : IDisposable
         }
         var bytes = await File.ReadAllBytesAsync(full, _cts.Token);
         await WriteAsync(stream, "200 OK", ContentType(full), bytes);
+    }
+
+    /// <summary>The page an unknown device sees: request access + wait for helm approval.</summary>
+    private static string RequestPage(string ip, string? mac, int status)
+    {
+        var macTxt = mac is null ? "unknown" :
+            string.Join(":", Enumerable.Range(0, 6).Select(i => mac.Substring(i * 2, 2)));
+        var stateJs = status switch { 0 => "'pending'", 1 => "'approved'", 2 => "'denied'", _ => "null" };
+        return @"<!doctype html><html><head><meta name=""viewport"" content=""width=device-width, initial-scale=1"">
+<title>Lagoon 630 — Connect</title></head>
+<body style=""background:#0a1014;color:#e8f0f2;font-family:-apple-system,'Helvetica Neue',sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;"">
+<div style=""text-align:center;max-width:420px;padding:24px;"">
+  <div style=""font-size:22px;font-weight:600;letter-spacing:6px;"">LAGOON</div>
+  <div style=""font-size:12px;letter-spacing:2px;color:#7d939e;margin-top:4px;"">630 MOTOR YACHT · VESSEL MONITOR</div>
+  <div id=""box"" style=""margin-top:34px;background:#131b22;border:1px solid #1f2b34;border-radius:14px;padding:26px;"">
+    <div id=""ask"">
+      <div style=""font-size:15px;font-weight:600;"">This device is not paired with the vessel.</div>
+      <div style=""font-size:13px;color:#9fb4be;margin-top:10px;line-height:1.5;"">Request access — the captain accepts it on the helm dashboard (⚙ SETUP → Network).</div>
+      <input id=""nm"" placeholder=""Device name (e.g. Salon iPad)"" maxlength=""40""
+        style=""margin-top:18px;width:100%;box-sizing:border-box;height:46px;padding:0 14px;border-radius:10px;background:#0d151b;border:1px solid #2a3844;color:#e8f0f2;font-size:14px;outline:none;"">
+      <div onclick=""ask()"" style=""margin-top:14px;height:48px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:#2fc4d1;color:#0a1014;font-size:13px;font-weight:700;letter-spacing:2px;cursor:pointer;"">REQUEST ACCESS</div>
+    </div>
+    <div id=""wait"" style=""display:none;"">
+      <div style=""font-size:15px;font-weight:600;"">Waiting for approval…</div>
+      <div style=""font-size:13px;color:#9fb4be;margin-top:10px;line-height:1.5;"">Accept this device on the helm dashboard:<br>⚙ SETUP → NETWORK → Connection requests.</div>
+      <div style=""margin-top:16px;color:#2fc4d1;font-size:26px;"" id=""dots"">·</div>
+    </div>
+    <div id=""denied"" style=""display:none;"">
+      <div style=""font-size:15px;font-weight:600;color:#ff8082;"">Request declined.</div>
+      <div onclick=""showAsk()"" style=""margin-top:16px;height:44px;display:flex;align-items:center;justify-content:center;border-radius:10px;border:1px solid #2a3844;color:#9fb4be;font-size:12px;font-weight:700;letter-spacing:1.5px;cursor:pointer;"">ASK AGAIN</div>
+    </div>
+  </div>
+  <div style=""margin-top:14px;font-size:11px;color:#4a5b66;font-family:monospace;"">IP " + ip + @" · MAC " + macTxt + @"</div>
+</div>
+<script>
+var st=" + stateJs + @";
+function show(id){['ask','wait','denied'].forEach(function(x){document.getElementById(x).style.display=x===id?'block':'none';});}
+function showAsk(){show('ask');}
+function ask(){
+  var n=document.getElementById('nm').value||'Unnamed device';
+  fetch('/api/request-access',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n})})
+    .then(function(){show('wait');});
+}
+function poll(){
+  fetch('/api/request-status').then(function(r){return r.json();}).then(function(d){
+    if(d.status==='approved'){location.reload();}
+    else if(d.status==='denied'){show('denied');}
+    else if(d.status==='pending'){show('wait');}
+  }).catch(function(){});
+  var el=document.getElementById('dots'); if(el){el.textContent=el.textContent.length>=5?'·':el.textContent+' ·';}
+}
+if(st==='pending')show('wait'); else if(st==='denied')show('denied');
+setInterval(poll,3000);
+</script></body></html>";
     }
 
     private static string ContentType(string path) => Path.GetExtension(path).ToLowerInvariant() switch

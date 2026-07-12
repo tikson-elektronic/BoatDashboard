@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.Win32;
@@ -13,11 +14,13 @@ public partial class SettingsWindow : Window
     public bool Saved { get; private set; }
 
     private readonly DispatcherTimer _pcTimer = new() { Interval = TimeSpan.FromMilliseconds(1500) };
+    private readonly LocalServer? _server;
 
-    public SettingsWindow(AppSettings settings)
+    public SettingsWindow(AppSettings settings, LocalServer? server = null)
     {
         InitializeComponent();
         Settings = settings;
+        _server = server;
 
         ApiKeyBox.Password = settings.ClaudeApiKey;
         KioskCheck.IsChecked = settings.Kiosk;
@@ -31,9 +34,10 @@ public partial class SettingsWindow : Window
         RefreshPairingUi();
         LoadLogs();
 
-        _pcTimer.Tick += (_, _) => UpdatePcStats();
+        _pcTimer.Tick += (_, _) => { UpdatePcStats(); RefreshRequests(); };
         _pcTimer.Start();
         UpdatePcStats();
+        RefreshRequests();
 
         Closed += (_, _) => _pcTimer.Stop();
     }
@@ -63,6 +67,81 @@ public partial class SettingsWindow : Window
     }
 
     private void RefreshLogs_Click(object sender, RoutedEventArgs e) => LoadLogs();
+
+    // ---- LAN connection requests (accept adds the device's MAC to the allowlist) ----
+
+    private string _lastReqKeys = "";
+
+    private void RefreshRequests()
+    {
+        if (_server is null) return;
+        var pending = _server.PendingRequests;
+        var keys = string.Join("|", pending.Select(r => r.Key + r.Name));
+        if (keys == _lastReqKeys) return;   // avoid rebuilding (and killing button clicks) every tick
+        _lastReqKeys = keys;
+
+        ReqPanel.Children.Clear();
+        if (pending.Count == 0)
+        {
+            ReqPanel.Children.Add(new TextBlock
+            {
+                Text = "No pending requests.",
+                FontSize = 11,
+                Foreground = System.Windows.Media.Brushes.Gray,
+                Margin = new Thickness(2, 0, 0, 0),
+            });
+            return;
+        }
+
+        foreach (var r in pending)
+        {
+            var row = new Grid { Margin = new Thickness(0, 3, 0, 3) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var info = new TextBlock
+            {
+                Text = $"{(r.Name.Length > 0 ? r.Name : "Unnamed device")}  ·  {r.Ip}" +
+                       (r.Mac is null ? "" : $"  ·  {string.Join(":", Enumerable.Range(0, 6).Select(i => r.Mac.Substring(i * 2, 2)))}"),
+                FontSize = 12,
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = (System.Windows.Media.Brush)FindResource("TextBrush"),
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            };
+            Grid.SetColumn(info, 0);
+
+            var accept = new Button { Content = "Accept", Height = 28, Padding = new Thickness(12, 0, 12, 0), Margin = new Thickness(8, 0, 0, 0) };
+            accept.Style = (Style)FindResource("SceneOn");
+            var key = r.Key;
+            var entry = r.Mac ?? r.Ip;   // prefer MAC (survives DHCP renewals)
+            accept.Click += (_, _) =>
+            {
+                if (!Settings.LanAllowList.Contains(entry, StringComparer.OrdinalIgnoreCase))
+                    Settings.LanAllowList.Add(entry);
+                SettingsStore.Save(Settings);
+                _server.SetAllowList(Settings.LanAllowList);
+                _server.ResolveRequest(key, approve: true);
+                AllowListBox.Text = string.Join(Environment.NewLine, Settings.LanAllowList);
+                _lastReqKeys = ""; RefreshRequests();
+            };
+            Grid.SetColumn(accept, 1);
+
+            var reject = new Button { Content = "Reject", Height = 28, Padding = new Thickness(12, 0, 12, 0), Margin = new Thickness(6, 0, 0, 0) };
+            reject.Style = (Style)FindResource("LightButton");
+            reject.Click += (_, _) =>
+            {
+                _server.ResolveRequest(key, approve: false);
+                _lastReqKeys = ""; RefreshRequests();
+            };
+            Grid.SetColumn(reject, 2);
+
+            row.Children.Add(info);
+            row.Children.Add(accept);
+            row.Children.Add(reject);
+            ReqPanel.Children.Add(row);
+        }
+    }
 
     private void RefreshPairingUi()
     {
