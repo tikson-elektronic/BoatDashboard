@@ -26,6 +26,8 @@ public partial class ShellWindow : Window
     private MulticastService? _mdns;
     private ServiceDiscovery? _sd;
 
+    private MqttAgent? _mqttAgent;   // onboard VOMS agent (publishes to the Alive cloud when paired)
+
     // Claude assistant + offline voice. _vm mirrors live readings for the assistant's get_status tool.
     private readonly DashboardViewModel _vm = new();
     private ClaudeAssistant? _assistant;
@@ -82,6 +84,7 @@ window.addEventListener('DOMContentLoaded', function(){
             try { _server?.Dispose(); } catch { }
             try { _sd?.Dispose(); _mdns?.Dispose(); } catch { }
             try { _voice?.Dispose(); } catch { }
+            try { _ = _mqttAgent?.DisposeAsync(); } catch { }
         };
     }
 
@@ -118,6 +121,18 @@ window.addEventListener('DOMContentLoaded', function(){
 
         StartLanServices(webDir);
         ApplyAssistant();
+        StartOnboardAgent();
+    }
+
+    /// <summary>Starts the VOMS cloud agent if this PC is paired (creds in C:\voms\mqtt.env).</summary>
+    private void StartOnboardAgent()
+    {
+        if (_mqttAgent is not null) return;
+        var creds = PairingService.LoadSaved();
+        if (creds is not { VesselId.Length: > 0 }) return;
+        _mqttAgent = new MqttAgent(creds, _client, PairingService.HardwareId);
+        _mqttAgent.Start();
+        Ip2slClient.Log("[onboard] agent started for vessel " + creds.VesselId);
     }
 
     /// <summary>(Re)creates the Claude assistant from the saved API key and the voice service.</summary>
@@ -363,6 +378,7 @@ window.addEventListener('DOMContentLoaded', function(){
             ApplyBlink();
             ApplyAssistant();
             _server?.SetAllowList(_settings.LanAllowList);   // takes effect immediately
+            StartOnboardAgent();                             // start publishing if just paired
         }
     }
 }
