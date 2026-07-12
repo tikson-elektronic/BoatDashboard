@@ -305,7 +305,7 @@
 var S = {
   screen:'home', navLights:false, anchorLight:true, nucLights:false, electronics:true, transfer:false,
   lightPos:{navGreen:[1.5,56],navRed:[1.5,64],navStern:[98,52],anchor:[26,2],nuc1:[26,0],nuc2:[26,14]},
-  zones:{salon:true,cockpit:false,fly:false,cabins:true,under:false,courtesy:true},
+  zones:{courtesy:false,pfcabin:false,pfgang:false,pmcabin:false,galley:false,salon:false,sfcabin:false,sacabin:false},
   shades:{port:0,stbd:0,front:100,aft:50},
   night:false, lang:'EN', units:'L', dim:80,
   av:{tvSalon:false,tvCabin:false,liftUp:true,amp:false,ampVol:40,ampSrc:'TV',ampMute:false,tvVol:22,tvCh:5,tvInput:'TV',tvApp:'',tvMute:false,tvPlay:true,remoteFull:false,devices:[],scanning:false},
@@ -322,7 +322,11 @@ var S = {
 var LIVE={ac:{v:222,a:9,hz:50},acDetail:{shore1:{v:222,a:9,hz:50},shore2:{v:237,a:6,hz:59.9},generator:{v:0,a:0,hz:0},inverter:{v:0,a:0,hz:0}},batteries:{genset:{v:13.4,a:1},portEngine:{v:13.5,a:0},stbdEngine:{v:13.4,a:0},service:{v:0,a:0}},fuelTransfer:{toTransfer:0,toGo:0},tanks:{waterPort:20,waterStbd:100,fuelAftPort:30,fuelFwdPort:28,fuelAftStbd:41,fuelFwdStbd:18},waterAvg:60,fuelAvg:29,service:{v:'0.0',low:true}};
 var OK='#35d07f',WARN='#ffb648',BAD='#ff4d4f',ACC='#2fc4d1',DIM='#7d939e',TXT='#e8f0f2';
 var NAV=[['home','HOME'],['ac','AC POWER'],['batteries','BATTERIES'],['tanks','TANKS'],['navigation','NAVIGATION'],['nav','NAV LIGHTS'],['engines','ENGINES'],['lighting','LIGHTING'],['av','AV'],['cameras','CAMERAS'],['electronics','ELECTRONICS'],['assistant','ASSISTANT'],['settings','SETTINGS']];
-var ZONES=[['salon','SALON'],['cockpit','COCKPIT'],['fly','FLYBRIDGE'],['cabins','CABINS'],['under','UNDERWATER'],['courtesy','COURTESY']];
+// The real 8 iTach-controlled lights: [key, label, iTach command code]. Tapping fires the code.
+var ZONES=[['courtesy','INTERIOR COURTESY',0x0009],['pfcabin','PORT FWD CABIN',0x0100],['pfgang','PORT FWD GANGWAY',0x0200],['pmcabin','PORT MID CABIN',0x0300],['galley','GALLEY',0x0500],['salon','SALON',0x0800],['sfcabin','STBD FWD CABIN',0x0900],['sacabin','STBD AFT CABIN',0x0D00]];
+var LIGHTCODE={};ZONES.forEach(function(z){LIGHTCODE[z[0]]=z[2];});
+// Toggle a light: flip the tracked state (iTach gives no light feedback) and fire its code to the controller.
+function lightTap(key){S.zones[key]=!S.zones[key];try{window.chrome.webview.postMessage({cmd:'light',code:LIGHTCODE[key]});}catch(e){}render();}
 var BOAT='uploads/L620MY Profile 900x402.png';
 
 function go(id){S.screen=id;render();}
@@ -444,7 +448,7 @@ home: function(){
   // LIGHTING
   +'<div class="tile" onclick="go(&quot;lighting&quot;)">'+tileHead('lighting','LIGHTING',true,zOn.length?'#ffd66b':'#2a3844')+'<div style="flex:1"></div>'
     +'<div style="display:flex;align-items:center;gap:14px;">'
-      +'<div class="cond big">'+zOn.length+'<span style="font-size:22px;color:#7d939e;">/6</span></div>'
+      +'<div class="cond big">'+zOn.length+'<span style="font-size:22px;color:#7d939e;">/'+ZONES.length+'</span></div>'
       +'<div style="display:flex;gap:5px;flex-wrap:wrap;">'+ZONES.map(function(z){var on=S.zones[z[0]];
         return '<div title="'+z[1]+'" style="width:14px;height:14px;border-radius:50%;background:'+(on?'radial-gradient(circle at 38% 34%, #fff7dd, #ffd66b 60%, #e0a92f)':'#1a242d')+';border:1px solid '+(on?'#b9891f':'#2a3844')+';'+(on?'box-shadow:0 0 8px rgba(255,196,60,0.6);':'')+'"></div>';}).join('')+'</div>'
     +'</div>'
@@ -882,18 +886,21 @@ engines: function(){
 },
 lighting: function(){
   var zOn=ZONES.filter(function(z){return S.zones[z[0]];}).length;
-  var names={salon:'SALON',cockpit:'COCKPIT',fly:'FLYBRIDGE',cabins:'CABINS',under:'UNDERWATER',courtesy:'COURTESY'};
+  var names={};ZONES.forEach(function(z){names[z[0]]=z[1];});
+  // Deck-plan lamp positions for the 8 real lights (port = left, stbd = right, bow = top).
   var spots=[
-    ['salon',44,50],['salon',56,50],['salon',50,56],['salon',44,60],['salon',56,60],
-    ['cockpit',40,72],['cockpit',50,74],['cockpit',60,72],
-    ['fly',44,42],['fly',56,42],['fly',50,38],
-    ['cabins',18,44],['cabins',82,44],['cabins',18,54],['cabins',82,54],['cabins',18,64],['cabins',82,64],
-    ['under',30,92],['under',50,93],['under',70,92],
-    ['courtesy',14,26],['courtesy',86,26],['courtesy',14,42],['courtesy',86,42],['courtesy',14,58],['courtesy',86,58],['courtesy',14,74],['courtesy',86,74],['courtesy',50,16]
+    ['salon',46,50],['salon',54,54],
+    ['galley',40,42],
+    ['pfcabin',20,28],['pfcabin',26,33],
+    ['pmcabin',20,58],
+    ['pfgang',14,46],
+    ['sfcabin',80,28],['sfcabin',74,33],
+    ['sacabin',80,72],
+    ['courtesy',50,13],['courtesy',14,74],['courtesy',86,74],['courtesy',50,90]
   ];
   var dots=spots.map(function(p){
     var on=S.zones[p[0]];
-    return '<div onclick="tgl(&quot;zones.'+p[0]+'&quot;)" title="'+names[p[0]]+'" style="position:absolute;left:'+p[1]+'%;top:'+p[2]+'%;width:22px;height:22px;margin:-11px;border-radius:50%;cursor:pointer;'
+    return '<div onclick="lightTap(&quot;'+p[0]+'&quot;)" title="'+names[p[0]]+'" style="position:absolute;left:'+p[1]+'%;top:'+p[2]+'%;width:22px;height:22px;margin:-11px;border-radius:50%;cursor:pointer;'
       +'background:'+(on?'radial-gradient(circle at 38% 34%, #fff7dd, #ffd66b 55%, #e0a92f)':'#c8d2d8')+';'
       +'border:2px solid '+(on?'#b9891f':'#8a99a3')+';'
       +(on?'box-shadow:0 0 22px 8px rgba(255,196,60,0.65), 0 2px 4px rgba(0,0,0,0.3);':'box-shadow:0 1px 3px rgba(0,0,0,0.25);')
@@ -901,7 +908,7 @@ lighting: function(){
   }).join('');
   return '<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px;">'
     +'<h2 class="cond" style="margin:0;">LIGHTING</h2>'
-    +'<div class="sub">'+zOn+' of 6 zones on \u00b7 tap a lamp on the plan or use the switches</div></div>'
+    +'<div class="sub">'+zOn+' of '+ZONES.length+' lights on \u00b7 tap a lamp on the plan or use the switches</div></div>'
   +'<div style="display:flex;gap:22px;align-items:flex-start;flex-wrap:wrap;">'
   +'<div class="card" style="flex:1.15;min-width:min(100%,280px);padding:16px;display:flex;justify-content:center;">'
     +'<div style="position:relative;aspect-ratio:336/655;width:min(100%, calc((100vh - 262px) * 0.513));margin:0 auto;">'
@@ -915,12 +922,12 @@ lighting: function(){
       +'<div onclick="setAllZones(false)" style="flex:1;height:42px;display:flex;align-items:center;justify-content:center;border-radius:8px;border:1px solid #2a3844;color:#7d939e;font-size:12px;font-weight:700;letter-spacing:1.5px;cursor:pointer;">ALL OFF</div>'
     +'</div>'
   +ZONES.map(function(z){var on=S.zones[z[0]];
-    return '<div class="card" onclick="tgl(&quot;zones.'+z[0]+'&quot;)" style="padding:12px 16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:14px;border-color:'+(on?'rgba(255,214,107,0.45)':'#1f2b34')+';'+(on?'background:linear-gradient(90deg,rgba(255,214,107,0.05),#131b22);':'')+'">'
+    return '<div class="card" onclick="lightTap(&quot;'+z[0]+'&quot;)" style="padding:12px 16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:14px;border-color:'+(on?'rgba(255,214,107,0.45)':'#1f2b34')+';'+(on?'background:linear-gradient(90deg,rgba(255,214,107,0.05),#131b22);':'')+'">'
     +'<div style="display:flex;align-items:center;gap:12px;">'
       +'<div style="width:10px;height:10px;border-radius:50%;background:'+(on?'#ffd66b':'#2a3844')+';'+(on?'box-shadow:0 0 10px 3px rgba(255,214,107,0.5);':'')+'"></div>'
       +'<div><div style="font-size:13px;font-weight:700;letter-spacing:1px;color:'+(on?TXT:DIM)+';">'+z[1]+'</div>'
       +'<div class="stlbl'+(on?' on':'')+'" style="margin-top:2px;color:'+(on?'#ffd66b':'#7d939e')+';">'+(on?'ON':'OFF')+'</div></div>'
-    +'</div>'+sw(on,'event.stopPropagation();tgl(&quot;zones.'+z[0]+'&quot;)')+'</div>';}).join('')
+    +'</div>'+sw(on,'event.stopPropagation();lightTap(&quot;'+z[0]+'&quot;)')+'</div>';}).join('')
   +'</div></div>'
   ;
 },
@@ -1213,6 +1220,15 @@ cameras: function(){
       +'style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:opacity .3s;'+(ir?'filter:saturate(0.35) brightness(1.1);':'')+'" '
       +'onload="this.style.opacity=1" onerror="this.style.opacity=0">';
   }
+  // "NO SIGNAL" placeholder shown behind the feed; the <img> covers it once a frame loads,
+  // and is revealed again (onerror sets opacity 0) if the camera/feed is unreachable.
+  function noSignal(nm){
+    return '<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;pointer-events:none;">'
+      +'<div style="width:44px;height:44px;border-radius:50%;border:2px solid rgba(255,255,255,0.18);display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.35);font-size:20px;">◌</div>'
+      +'<div style="font-size:11px;font-weight:700;letter-spacing:2px;color:rgba(255,255,255,0.4);">NO SIGNAL</div>'
+      +(nm?'<div style="font-size:10px;color:rgba(255,255,255,0.3);letter-spacing:1px;">'+nm+'</div>':'')
+      +'</div>';
+  }
   // YOLO detection boxes overlaid on the feed (normalised x/y/w/h from the vision service).
   function feedBoxes(i){
     var ds=(S.camDets&&S.camDets[i])||[];
@@ -1241,6 +1257,7 @@ cameras: function(){
   // main viewer
   var main='<div class="card" style="padding:0;overflow:hidden;flex:2.6;min-width:min(100%,440px);display:flex;flex-direction:column;">'
     +'<div style="position:relative;aspect-ratio:16/9;background:'+feedBg(sel)+';'+(ir?'filter:saturate(0.35) brightness(1.1);':'')+'">'
+    +(haveReal?noSignal(cams[sel][0]):'')
     +feedImg(sel)
     +feedBoxes(sel)
     +scanlines()
