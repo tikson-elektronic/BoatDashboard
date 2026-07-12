@@ -28,6 +28,9 @@ public sealed class LocalServer : IDisposable
     /// <summary>Invoked for control messages posted by a remote browser: (cmd, code).</summary>
     public Action<string, uint>? OnCommand;
 
+    /// <summary>AV discovery/control for remote (iPad) clients.</summary>
+    public AvService? Av;
+
     /// <summary>Expected "Basic &lt;base64(user:pass)&gt;" value, or null when auth is disabled.</summary>
     private readonly string? _expectedAuth;
 
@@ -68,6 +71,7 @@ public sealed class LocalServer : IDisposable
 <link rel=""apple-touch-icon"" href=""/uploads/lagoon-logo.png"">
 <script>(function(){
   if(!(window.chrome&&window.chrome.webview)){
+    window.__remote=true;
     window.chrome={webview:{postMessage:function(o){try{fetch('/api/cmd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(o)});}catch(e){}}}};
   }
   window.vomsApply=function(d){try{if(!window.LIVE)return;(function m(t,s){for(var k in s){var v=s[k];if(v&&typeof v==='object'&&!Array.isArray(v)&&t[k]&&typeof t[k]==='object')m(t[k],v);else t[k]=v;}})(window.LIVE,d);if('alarm' in d&&typeof S!=='undefined')S.alarm=!!d.alarm;if(window.render)render();}catch(e){}};
@@ -276,10 +280,56 @@ public sealed class LocalServer : IDisposable
                     return;
                 }
 
+                if (path == "/api/av/devices" && Av is not null)
+                {
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes(Av.DevicesJson()));
+                    return;
+                }
+                if (path == "/api/av/discover" && Av is not null)
+                {
+                    await Av.DiscoverAsync();
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes(Av.DevicesJson()));
+                    return;
+                }
+                if (method == "POST" && path == "/api/av/control" && Av is not null)
+                {
+                    var b = await ReadBodyAsync(stream, lines);
+                    string devId = "", act = "", val = "";
+                    try
+                    {
+                        using var d = JsonDocument.Parse(b);
+                        devId = d.RootElement.TryGetProperty("id", out var i) ? i.GetString() ?? "" : "";
+                        act = d.RootElement.TryGetProperty("action", out var a) ? a.GetString() ?? "" : "";
+                        val = d.RootElement.TryGetProperty("value", out var v) ? (v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : v.ToString()) : "";
+                    }
+                    catch { }
+                    var res = await Av.ControlAsync(devId, act, string.IsNullOrEmpty(val) ? null : val);
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { result = res })));
+                    return;
+                }
+
                 await ServeFileAsync(stream, path);
             }
         }
         catch { /* per-connection errors are non-fatal */ }
+    }
+
+    /// <summary>Reads the request body using the Content-Length header.</summary>
+    private async Task<string> ReadBodyAsync(NetworkStream stream, string[] lines)
+    {
+        int len = 0;
+        foreach (var l in lines)
+            if (l.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase))
+                int.TryParse(l[15..].Trim(), out len);
+        var body = new byte[Math.Clamp(len, 0, 8192)];
+        int got = 0;
+        while (got < body.Length)
+        {
+            int n = await stream.ReadAsync(body.AsMemory(got), _cts.Token);
+            if (n == 0) break;
+            got += n;
+        }
+        return Encoding.UTF8.GetString(body, 0, got);
     }
 
     private void HandleCommand(string json)

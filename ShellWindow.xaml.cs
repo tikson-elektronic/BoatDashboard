@@ -27,6 +27,9 @@ public partial class ShellWindow : Window
     private ServiceDiscovery? _sd;
 
     private MqttAgent? _mqttAgent;   // onboard VOMS agent (publishes to the Alive cloud when paired)
+    private readonly AvService _av = new();   // AV device discovery + control (TVs, amplifiers)
+    private readonly MemoryStore _memory = new();
+    private AutomationService? _autos;
 
     // Claude assistant + offline voice. _vm mirrors live readings for the assistant's get_status tool.
     private readonly DashboardViewModel _vm = new();
@@ -85,6 +88,8 @@ window.addEventListener('DOMContentLoaded', function(){
             try { _sd?.Dispose(); _mdns?.Dispose(); } catch { }
             try { _voice?.Dispose(); } catch { }
             try { _ = _mqttAgent?.DisposeAsync(); } catch { }
+            try { _av.StopBackgroundScan(); } catch { }
+            try { _autos?.Stop(); } catch { }
         };
     }
 
@@ -120,8 +125,76 @@ window.addEventListener('DOMContentLoaded', function(){
         _timer.Start();
 
         StartLanServices(webDir);
+        StartVesselBrain();
         ApplyAssistant();
         StartOnboardAgent();
+    }
+
+    /// <summary>Starts the always-on "being": AV discovery/watch + the automation engine, and
+    /// makes new-device discoveries speak to the owner.</summary>
+    private void StartVesselBrain()
+    {
+        _av.OnNewDevice += OnNewAvDevice;
+        _av.StartBackgroundScan();
+
+        _autos = new AutomationService(RunAutoActionAsync, SensorValue);
+        _autos.Lat = _settings.VesselLat;
+        _autos.Lon = _settings.VesselLon;
+        _autos.Start();
+    }
+
+    /// <summary>The being announces a freshly-discovered device to the owner (chat + voice).</summary>
+    private void OnNewAvDevice(AvDevice d)
+    {
+        if (d.Type is "media") return;   // only announce recognisable AV gear
+        var article = "aeiou".Contains(char.ToLower(d.Type[0])) ? "an" : "a";
+        var brand = string.IsNullOrWhiteSpace(d.Manufacturer) ? "" : d.Manufacturer + " ";
+        var msg = d.NeedsPairing
+            ? $"Hey — I found {article} {brand}{d.Type} “{d.Name}” on the network. It needs pairing before I can control it. Want me to start that?"
+            : $"Hey — I found {article} {brand}{d.Type} “{d.Name}” on the network. Want me to add it to the system?";
+        Dispatcher.BeginInvoke(() =>
+        {
+            var json = JsonSerializer.Serialize(msg);
+            var dev = JsonSerializer.Serialize(d.Id);
+            _ = Web.CoreWebView2?.ExecuteScriptAsync($"window.assistNotify&&window.assistNotify({json},{dev})");
+            _voice?.Speak(msg);
+        });
+    }
+
+    /// <summary>Current value for a sensor name (for automation conditions).</summary>
+    private double? SensorValue(string name) => name switch
+    {
+        "battery-service" => (_client.Field("00", 8) ?? 0) / 10.0,
+        "battery-genset" => (_client.Field("00", 2) ?? 0) / 10.0,
+        "fresh-water-port" => _client.Field("00", 10),
+        "fresh-water-stbd" => _client.Field("00", 11),
+        "fuel-fwd-port" => _client.Field("03", 2),
+        "shore-1-volts" => _client.Field("02", 0),
+        _ => null,
+    };
+
+    /// <summary>Executes a structured automation action.</summary>
+    private async Task RunAutoActionAsync(AutoAction a)
+    {
+        switch (a.Type)
+        {
+            case "light": if (a.Code != 0) await _client.SendCommandAsync((uint)a.Code); break;
+            case "all_lights":
+                await _client.SendCommandAsync(a.Value?.StartsWith("on", StringComparison.OrdinalIgnoreCase) == true ? 0x0600u : 0x0700u);
+                break;
+            case "av":
+                if (a.Target is not null && _av.Match(a.Target) is { } dev)
+                    await _av.ControlAsync(dev.Id, a.Value ?? "", null);
+                break;
+            case "notify":
+                Dispatcher.BeginInvoke(() =>
+                {
+                    var json = JsonSerializer.Serialize(a.Value ?? "");
+                    _ = Web.CoreWebView2?.ExecuteScriptAsync($"window.assistNotify&&window.assistNotify({json},null)");
+                    _voice?.Speak(a.Value ?? "");
+                });
+                break;
+        }
     }
 
     /// <summary>Starts the VOMS cloud agent if this PC is paired (creds in C:\voms\mqtt.env).</summary>
@@ -140,7 +213,7 @@ window.addEventListener('DOMContentLoaded', function(){
     {
         _assistant = string.IsNullOrWhiteSpace(_settings.ClaudeApiKey)
             ? null
-            : new ClaudeAssistant(_settings.ClaudeApiKey, _client, _vm);
+            : new ClaudeAssistant(_settings.ClaudeApiKey, _client, _vm, _av, _memory, _autos);
 
         if (_voice is null)
         {
@@ -180,6 +253,15 @@ window.addEventListener('DOMContentLoaded', function(){
         _ = Web.CoreWebView2?.ExecuteScriptAsync($"window.claudeReply({json})");
     }
 
+    /// <summary>Runs AV discovery and pushes the device list to the page.</summary>
+    private async Task DiscoverAvAsync()
+    {
+        _ = Web.CoreWebView2?.ExecuteScriptAsync("window.avScanning&&window.avScanning(true)");
+        try { await _av.DiscoverAsync(); } catch { }
+        var json = _av.DevicesJson();
+        _ = Web.CoreWebView2?.ExecuteScriptAsync($"window.avDevices({json})");
+    }
+
     /// <summary>Serves the UI over HTTP on the LAN and advertises the PC via mDNS.</summary>
     private void StartLanServices(string webDir)
     {
@@ -187,6 +269,7 @@ window.addEventListener('DOMContentLoaded', function(){
         {
             _server = new LocalServer(webDir, HttpPort, _settings.LanUser, _settings.LanPass);
             _server.SetAllowList(_settings.LanAllowList);
+            _server.Av = _av;
             // Route remote-browser commands through the same handler as the WebView2 bridge.
             _server.OnCommand = (cmd, code) => Dispatcher.BeginInvoke(() => RunCommand(cmd, code));
             _server.Start();
@@ -332,17 +415,18 @@ window.addEventListener('DOMContentLoaded', function(){
 
     private void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
-        string cmd, text = "";
+        string cmd, text = "", device = "", action = "", value = "";
         uint code = 0;
         try
         {
             using var doc = JsonDocument.Parse(e.WebMessageAsJson);
             var root = doc.RootElement;
             cmd = root.TryGetProperty("cmd", out var c) ? c.GetString() ?? "" : "";
-            if (root.TryGetProperty("code", out var cd) && cd.TryGetInt64(out var n))
-                code = (uint)n;
-            if (root.TryGetProperty("text", out var t))
-                text = t.GetString() ?? "";
+            if (root.TryGetProperty("code", out var cd) && cd.TryGetInt64(out var n)) code = (uint)n;
+            if (root.TryGetProperty("text", out var t)) text = t.GetString() ?? "";
+            if (root.TryGetProperty("device", out var dv)) device = dv.GetString() ?? "";
+            if (root.TryGetProperty("action", out var ac)) action = ac.GetString() ?? "";
+            if (root.TryGetProperty("value", out var vl)) value = vl.ValueKind == JsonValueKind.String ? vl.GetString() ?? "" : vl.ToString();
         }
         catch { return; }
 
@@ -350,6 +434,16 @@ window.addEventListener('DOMContentLoaded', function(){
         {
             case "settings":
                 OpenSettings();
+                break;
+            case "av_discover":
+                _ = DiscoverAvAsync();
+                break;
+            case "av_control":
+                _ = _av.ControlAsync(device, action, string.IsNullOrEmpty(value) ? null : value);
+                break;
+            case "av_accept":
+                _av.Accept(device);
+                _ = Web.CoreWebView2?.ExecuteScriptAsync($"window.avDevices({_av.DevicesJson()})");
                 break;
             case "claude":
                 if (text.Length > 0) _ = AskClaudeAsync(text);

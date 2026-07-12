@@ -36,6 +36,10 @@ public sealed class AppSettings
     /// Empty list = every device on the LAN is allowed. Loopback is always allowed.
     /// </summary>
     public List<string> LanAllowList { get; set; } = new();
+
+    /// <summary>Vessel position for daylight-based automations (default Antibes).</summary>
+    public double VesselLat { get; set; } = 43.55;
+    public double VesselLon { get; set; } = 7.02;
 }
 
 public static class SettingsStore
