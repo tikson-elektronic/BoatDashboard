@@ -36,8 +36,16 @@ public partial class App : Application
             Ip2slClient.Log("[selfheal] domain exception: " + (args.ExceptionObject as Exception)?.ToString());
         TaskScheduler.UnobservedTaskException += (_, args) =>
         {
+            args.SetObserved();   // observe it either way so it never escalates
+            // The mDNS library (Makaretu) re-binds its UDP receivers on network changes, surfacing
+            // benign aborted/interrupted socket I/O as unobserved exceptions. Don't spam the log with those.
+            var ex = args.Exception?.GetBaseException();
+            if (ex is System.Net.Sockets.SocketException se &&
+                (se.SocketErrorCode == System.Net.Sockets.SocketError.OperationAborted ||
+                 se.SocketErrorCode == System.Net.Sockets.SocketError.Interrupted ||
+                 se.SocketErrorCode == System.Net.Sockets.SocketError.ConnectionReset))
+                return;
             Ip2slClient.Log("[selfheal] unobserved task exception: " + args.Exception);
-            args.SetObserved();
         };
 
         base.OnStartup(e);
