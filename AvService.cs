@@ -29,6 +29,7 @@ public sealed class AvDevice
     public bool Accepted { get; set; }               // user approved it into the system
     public string Psk { get; set; } = "0000";        // Sony IP-control pre-shared key (set the same on the TV)
     public string? ClientKey { get; set; }           // LG webOS pairing key / Samsung token, persisted after first pair
+    public string? SamsungAppName { get; set; }      // the name shown in the TV's Allow prompt / device list
     public bool Online => (DateTime.UtcNow - LastSeen).TotalSeconds < 150;   // watched: 3 missed scans
 }
 
@@ -480,7 +481,10 @@ public sealed class AvService
             ["select"] = "KEY_ENTER", ["back"] = "KEY_RETURN", ["play"] = "KEY_PLAY", ["pause"] = "KEY_PAUSE",
         };
         if (!keys.TryGetValue(action, out var key)) return $"Samsung: unknown action '{action}'.";
-        var name = Convert.ToBase64String(Encoding.UTF8.GetBytes("BoatDashboard"));
+        // Use a stable per-device app name. If we've never paired, and one was tried before, the TV may
+        // remember it as denied and refuse (ms.channel.timeOut) — so pick a fresh name until paired.
+        d.SamsungAppName ??= "Vessel Monitor";
+        var name = Convert.ToBase64String(Encoding.UTF8.GetBytes(d.SamsungAppName));
 
         // Modern Samsung (2016+) uses secure wss:8002 with a token issued on first authorisation.
         // We accept the TV's self-signed cert, capture the token from the connect frame, and persist it
@@ -491,9 +495,10 @@ public sealed class AvService
 
         string tokenQs = string.IsNullOrEmpty(d.ClientKey) ? "" : $"&token={d.ClientKey}";
         bool secure = true;
-        try { await ws.ConnectAsync(new Uri($"wss://{d.Ip}:8002/api/v2/channels/samsung.remote.control?name={name}{tokenQs}"), cts.Token); }
-        catch
+        try { await ws.ConnectAsync(new Uri($"wss://{d.Ip}:8002/api/v2/channels/samsung.remote.control?name={name}{tokenQs}"), cts.Token); Ip2slClient.Log($"[samsung] wss:8002 connected state={ws.State}"); }
+        catch (Exception cex)
         {
+            Ip2slClient.Log("[samsung] wss:8002 connect failed: " + cex.Message + " -> trying legacy ws:8001");
             secure = false;
             using var ws2 = new ClientWebSocket();
             using var cts2 = new CancellationTokenSource(TimeSpan.FromSeconds(6));
@@ -505,25 +510,49 @@ public sealed class AvService
             return $"Samsung {key} sent (legacy).";
         }
 
-        // Read the connect frame — it carries the auth token on first pairing.
-        try
+        // On first pairing the TV shows an "Allow BoatDashboard" prompt and only issues the auth token
+        // AFTER the user accepts. The prompt stays up only while a client is connected — so if we don't
+        // already have a token, HOLD the connection open and keep reading until the token arrives (up to
+        // 40 s, giving the user time to grab the remote and accept). With a token, just a quick read.
+        bool hadToken = !string.IsNullOrEmpty(d.ClientKey);
+        bool denied = false;
+        var buf = new byte[8192];
+        var deadline = DateTime.UtcNow.AddSeconds(hadToken ? 4 : 40);
+        using (var readCts = new CancellationTokenSource(TimeSpan.FromSeconds(hadToken ? 4 : 42)))
         {
-            var buf = new byte[8192];
-            var res = await ws.ReceiveAsync(buf, cts.Token);
-            var frame = Encoding.UTF8.GetString(buf, 0, res.Count);
-            using var doc = JsonDocument.Parse(frame);
-            if (doc.RootElement.TryGetProperty("data", out var data) &&
-                data.TryGetProperty("token", out var tok) && tok.GetString() is { Length: > 0 } t)
-                d.ClientKey = t;   // persist the token for silent future commands
+            while (DateTime.UtcNow < deadline && string.IsNullOrEmpty(d.ClientKey))
+            {
+                WebSocketReceiveResult res;
+                try { res = await ws.ReceiveAsync(buf, readCts.Token); }
+                catch (Exception rex) { Ip2slClient.Log("[samsung] receive ended: " + rex.Message); break; }
+                var frame = Encoding.UTF8.GetString(buf, 0, res.Count);
+                Ip2slClient.Log("[samsung] frame: " + (frame.Length > 180 ? frame[..180] : frame));
+                try
+                {
+                    using var doc = JsonDocument.Parse(frame);
+                    var root = doc.RootElement;
+                    var ev = root.TryGetProperty("event", out var e) ? e.GetString() : "";
+                    if (root.TryGetProperty("data", out var data) && data.TryGetProperty("token", out var tok) && tok.GetString() is { Length: > 0 } t)
+                    { d.ClientKey = t; break; }                        // accepted → token issued
+                    if (ev == "ms.channel.unauthorized") { denied = true; break; }  // user tapped Deny
+                    if (hadToken && ev == "ms.channel.connect") break; // already authorised
+                }
+                catch { }
+            }
         }
-        catch { }
 
-        var msg = JsonSerializer.Serialize(new { method = "ms.remote.control", @params = new { Cmd = "Click", DataOfCmd = key, Option = "false", TypeOfRemote = "SendRemoteKey" } });
-        await ws.SendAsync(Encoding.UTF8.GetBytes(msg), WebSocketMessageType.Text, true, cts.Token);
+        // Only send the keypress once we're authorised (a key sent before acceptance is ignored anyway).
+        if (!string.IsNullOrEmpty(d.ClientKey) || hadToken)
+        {
+            var msg = JsonSerializer.Serialize(new { method = "ms.remote.control", @params = new { Cmd = "Click", DataOfCmd = key, Option = "false", TypeOfRemote = "SendRemoteKey" } });
+            try { await ws.SendAsync(Encoding.UTF8.GetBytes(msg), WebSocketMessageType.Text, true, cts.Token); } catch { }
+        }
         try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token); } catch { }
+
+        if (denied) return "Samsung: you tapped Deny on the TV. Re-run and choose Allow to pair.";
         return string.IsNullOrEmpty(d.ClientKey)
-            ? $"Samsung {key} sent — if nothing happened, accept the 'Allow' prompt on the TV once."
-            : $"Samsung {key} sent.";
+            ? "Samsung: waiting for you to accept the 'Allow' prompt on the TV (look for it on screen, then run this again). If no prompt appears, enable External Device Manager > Device Connect Manager > Access Notification on the TV."
+            : $"Samsung {key} sent (paired ✓).";
     }
 
     // ---- LG webOS (SSAP WebSocket) ----
