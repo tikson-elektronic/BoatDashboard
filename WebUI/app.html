@@ -1517,7 +1517,7 @@ function buildCarousel(){
       +'</div></div>';
   }).join('');
   var curLbl=NAV.filter(function(n){return n[0]===S.screen;})[0];
-  return '<div onclick="navToggle()" onwheel="event.preventDefault();navRotate(event.deltaY>0?1:-1)" style="position:fixed;inset:0;z-index:200;background:rgba(6,10,14,0.72);backdrop-filter:blur(6px);">'
+  return '<div onclick="navToggle()" onwheel="event.preventDefault();navRotate(event.deltaY>0?1:-1)" style="position:fixed;inset:0;z-index:200;background:rgba(6,10,14,0.72);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);">'
     +(function(){var dp=dialPosNow();return '<div id="navDialBox" onpointerdown="event.stopPropagation();dialDrag(event)" style="position:absolute;left:'+dp.x+'px;top:'+dp.y+'px;width:460px;height:460px;touch-action:none;">';})()
     // machined chrome bezel (SVG, same language as the gauges)
     +(function(){

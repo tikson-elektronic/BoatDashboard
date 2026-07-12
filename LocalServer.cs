@@ -549,7 +549,7 @@ public sealed class LocalServer : IDisposable
             return;
         }
         var bytes = await File.ReadAllBytesAsync(full, _cts.Token);
-        await WriteAsync(stream, "200 OK", ContentType(full), bytes);
+        await WriteAsync(stream, "200 OK", ContentType(full), bytes, cacheSeconds: 86400);  // static asset → cache 1 day
     }
 
     /// <summary>The page an unknown device sees: request access + wait for helm approval.</summary>
@@ -618,12 +618,15 @@ setInterval(poll,3000);
         _ => "application/octet-stream",
     };
 
-    private async Task WriteAsync(NetworkStream stream, string status, string contentType, byte[] body)
+    private async Task WriteAsync(NetworkStream stream, string status, string contentType, byte[] body, int cacheSeconds = 0)
     {
+        // Telemetry/API stay no-store; static assets (images/css/js) get a real max-age so the iPad
+        // caches them — otherwise the 1 s dashboard re-render re-fetches the boat image and it blinks.
+        var cache = cacheSeconds > 0 ? $"Cache-Control: max-age={cacheSeconds}" : "Cache-Control: no-store";
         var header = $"HTTP/1.1 {status}\r\nContent-Type: {contentType}\r\nContent-Length: {body.Length}\r\n" +
                      "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\n" +
                      "Access-Control-Allow-Headers: Content-Type, Authorization\r\n" +
-                     "Cache-Control: no-store\r\nConnection: close\r\n\r\n";
+                     cache + "\r\nConnection: close\r\n\r\n";
         var head = Encoding.ASCII.GetBytes(header);
         await stream.WriteAsync(head, _cts.Token);
         await stream.WriteAsync(body, _cts.Token);
