@@ -513,6 +513,7 @@ window.addEventListener('DOMContentLoaded', function(){
             case "all_on": _ = _client.SendCommandAsync(0x0600u); break;
             case "all_off": _ = _client.SendCommandAsync(0x0700u); break;
             case "light": if (code != 0) _ = _client.SendCommandAsync(code); break;
+            case "alarm_ack": _navico?.Acknowledge(); break;   // silence active alarms on the MFD
         }
     }
 

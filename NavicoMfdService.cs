@@ -32,6 +32,8 @@ public sealed class NavicoMfdService : IDisposable
     private readonly Func<IReadOnlyList<Alarm>> _alarms;
     private readonly CancellationTokenSource _cts = new();
     private int _tick;
+    private readonly Dictionary<string, int> _alarmSince = new();   // alarm type → tick first raised (stable NewTickCount)
+    private volatile int _ackTick = -1;                             // alarms first raised at/before this tick are acknowledged
 
     public NavicoMfdService(int httpPort, Func<IReadOnlyList<Alarm>> alarms)
     {
@@ -101,6 +103,19 @@ public sealed class NavicoMfdService : IDisposable
     private void SendAlarms(UdpClient udp, string ip)
     {
         var alarms = _alarms();
+        var active = new HashSet<string>();
+        // NewTickCount must stay STABLE while an alarm persists — bumping it every cycle made the MFD treat
+        // the same alarm as brand-new each 5 s and re-alert, so an acknowledge never stuck. Stamp the tick
+        // when an alarm first appears and reuse it; drop it when the alarm clears so a re-occurrence is new.
+        var arr = alarms.Select(a =>
+        {
+            active.Add(a.Type);
+            if (!_alarmSince.TryGetValue(a.Type, out var since)) { since = _tick; _alarmSince[a.Type] = since; }
+            int isNew = since > _ackTick ? a.New : 0;   // acknowledged alarms report New=0 → MFD won't re-alert
+            return new { a.Type, a.Count, New = isNew, NewTickCount = since };
+        }).ToArray();
+        foreach (var k in _alarmSince.Keys.Where(k => !active.Contains(k)).ToList()) _alarmSince.Remove(k);
+
         var msg = new Dictionary<string, object?>
         {
             ["Version"] = "1",
@@ -110,10 +125,14 @@ public sealed class NavicoMfdService : IDisposable
             ["WatchdogInterval"] = 20,
             ["URL"] = $"http://{ip}:{_httpPort}/",
             ["TickCount"] = _tick,
-            ["Alarms"] = alarms.Select(a => new { a.Type, a.Count, New = a.New, NewTickCount = _tick }).ToArray(),
+            ["Alarms"] = arr,
         };
         Send(udp, msg, AlarmPort);
     }
+
+    /// <summary>Acknowledge all currently-active alarms: they keep showing as active but stop re-alerting
+    /// on the MFD (New=0). A genuinely new alarm raised later still alerts.</summary>
+    public void Acknowledge() => _ackTick = _tick;
 
     private static void Send(UdpClient udp, object payload, int port)
     {
