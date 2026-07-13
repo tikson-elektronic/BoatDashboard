@@ -329,7 +329,7 @@ var LIGHTCODE={};ZONES.forEach(function(z){LIGHTCODE[z[0]]=z[2];});
 function lightTap(key){S.zones[key]=!S.zones[key];try{window.chrome.webview.postMessage({cmd:'light',code:LIGHTCODE[key]});}catch(e){}render();}
 var BOAT='uploads/L620MY Profile 900x402.png';
 
-function go(id){S.screen=id;render();}
+function go(id){S.screen=id;render();if(id==="cameras"&&typeof refreshAllCams==="function")refreshAllCams();}
 function tgl(path){
   if(path.indexOf('.')>0){var p=path.split('.');S[p[0]][p[1]]=!S[p[0]][p[1]];}
   else S[path]=!S[path];
@@ -1216,9 +1216,11 @@ cameras: function(){
   // Real feed <img> overlaid on the gradient; if the snapshot fails it fades out and the gradient shows through.
   function feedImg(i){
     if(!haveReal)return '';
-    return '<img data-cam="'+i+'" src="/api/cam?i='+i+'&t='+(S.camTick||0)+'" '
-      +'style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:opacity .3s;'+(ir?'filter:saturate(0.35) brightness(1.1);':'')+'" '
-      +'onload="this.style.opacity=1" onerror="this.style.opacity=0">';
+    // Use the cached blob for this camera so a full re-render shows the last frame INSTANTLY (no network
+    // round-trip, no blank flash). refreshCam() updates the blob + this <img> in place every few seconds.
+    var src=(window._camSrc&&window._camSrc[i])||'';
+    return '<img data-cam="'+i+'" src="'+src+'" '
+      +'style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:opacity .3s;opacity:'+(src?1:0)+';'+(ir?'filter:saturate(0.35) brightness(1.1);':'')+'">';
   }
   // "NO SIGNAL" placeholder shown behind the feed; the <img> covers it once a frame loads,
   // and is revealed again (onerror sets opacity 0) if the camera/feed is unreachable.
@@ -1455,7 +1457,7 @@ function navToggle(){
   }
   render();
 }
-function navPick(id){S.navOpen=false;S.screen=id;render();}
+function navPick(id){S.navOpen=false;S.screen=id;render();if(id==="cameras"&&typeof refreshAllCams==="function")refreshAllCams();}
 function navRotate(d){
   _navRot+=d*(360/NAV.length);
   var ring=document.getElementById('navRing');
@@ -1584,25 +1586,30 @@ function camSet(k,v){S.cams[k]=v;render();}
 function camCount(){return (S.camList&&S.camList.length)?S.camList.length:6;}
 function camStep(d){var n=camCount();S.cams.sel=(S.cams.sel+d+n)%n;render();}
 // Host injects the live camera list ([{i,name}]); render if we're on the cameras screen.
-window.camApply=function(list){try{S.camList=(typeof list==="string")?JSON.parse(list):(list||[]);}catch(e){S.camList=[];}if(S.screen==="cameras")render();};
+window.camApply=function(list){try{S.camList=(typeof list==="string")?JSON.parse(list):(list||[]);}catch(e){S.camList=[];}if(S.screen==="cameras")render();if(typeof refreshAllCams==="function")refreshAllCams();};
 // YOLO detections for camera i (from the onboard vision service) — drawn as boxes on the feed.
 window.camDetections=function(i,dets){S.camDets=S.camDets||{};try{S.camDets[i]=(typeof dets==="string")?JSON.parse(dets):(dets||[]);}catch(e){S.camDets[i]=[];}if(S.screen==="cameras")render();};
 // Snapshot polling: refresh each visible feed <img> in place (no full re-render → no flicker) every 2 s.
-// Snapshot polling: refresh each feed only once the previous frame has loaded, so a slow proxy
-// fetch is never replaced mid-load (which left the tile blank). Interval 4s.
-setInterval(function(){
-  if(S.screen!=="cameras")return; if(!(S.camList&&S.camList.length))return;
-  var t=Date.now(); S.camTick=t;
-  var els=document.querySelectorAll("[data-cam]");
-  for(var i=0;i<els.length;i++){
-    var im=els[i];
-    if(im.__loading)continue;                    // still fetching the last frame — don't stomp it
-    im.__loading=true;
-    im.onload=function(){this.__loading=false;this.style.opacity=1;};
-    im.onerror=function(){this.__loading=false;this.style.opacity=0;};
-    im.src="/api/cam?i="+im.getAttribute("data-cam")+"&t="+t;
-  }
-},4000);
+// Snapshot polling via fetch()→blob, cached per camera. Fetching into a blob URL (instead of pointing
+// the <img> straight at the proxy) means a full re-render can reuse the cached frame instantly with no
+// blank flash, and the live <img> is only swapped once the NEW frame has fully downloaded. This kills
+// the blinking that came from render() recreating the <img> every time YOLO pushed detections.
+window._camSrc=window._camSrc||{};
+var _camBusy={};
+function refreshCam(i){
+  if(_camBusy[i])return; _camBusy[i]=true;
+  fetch("/api/cam?i="+i,{cache:"no-store"}).then(function(r){return r.ok?r.blob():Promise.reject(r.status);})
+    .then(function(b){
+      var url=URL.createObjectURL(b), old=window._camSrc[i];
+      window._camSrc[i]=url;
+      var els=document.querySelectorAll('[data-cam="'+i+'"]');   // swap every live tile for this cam, in place
+      for(var k=0;k<els.length;k++){els[k].src=url;els[k].style.opacity=1;}
+      if(old)URL.revokeObjectURL(old);
+      _camBusy[i]=false;
+    }).catch(function(){_camBusy[i]=false;});
+}
+function refreshAllCams(){if(!(S.camList&&S.camList.length))return;for(var i=0;i<S.camList.length;i++)refreshCam(i);}
+setInterval(function(){ if(S.screen==="cameras")refreshAllCams(); },4000);
 // Remote (LAN browser) fetches the list itself; the WebView gets it pushed via camApply.
 if(window.__remote){fetch("/api/cameras").then(function(r){return r.json();}).then(function(d){window.camApply(d);}).catch(function(){});}
 function engToggle(){S.engines.running=!S.engines.running;render();}
