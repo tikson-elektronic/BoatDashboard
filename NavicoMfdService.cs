@@ -84,8 +84,8 @@ public sealed class NavicoMfdService : IDisposable
             ["FeatureName"] = Feature,
             ["IP"] = ip,
             ["Text"] = new[] { new { Language = "en", Name = "Vessel Monitor" } },
-            ["Image"] = $"{baseUrl}/uploads/lagoon-logo.png",
-            ["Icon"] = $"{baseUrl}/uploads/lagoon-logo.png",
+            ["Image"] = $"{baseUrl}/uploads/mfd-icon.png",
+            ["Icon"] = $"{baseUrl}/uploads/mfd-icon.png",
             ["URL"] = $"{baseUrl}/",
             ["BrowserPanel"] = new
             {

@@ -1745,6 +1745,19 @@ function dragLight(ev,key){
   el.addEventListener('pointermove',move);
   el.addEventListener('pointerup',up);
 }
+// Touch bridge for the MFD / embedded browsers: some don't reliably synthesize a click from a tap, which
+// left the nav ring and buttons dead on the chartplotter. On touchend, fire the tapped element's click
+// ourselves and cancel the (missing/delayed) synthetic click so nothing double-fires. Skip form fields so
+// the keyboard/inputs still work; touchend-preventDefault doesn't affect scrolling (that's touchmove).
+(function(){
+  document.addEventListener('touchend', function(e){
+    var el = e.target && e.target.closest ? e.target.closest('[onclick]') : null;
+    if(!el) return;
+    if(e.target.closest('input,textarea,select')) return;
+    e.preventDefault();
+    try{ el.click(); }catch(_){}
+  }, {passive:false, capture:true});
+})();
 clock();setInterval(clock,15000);
 setInterval(function(){
   if(S.screen!=='navigation')return;

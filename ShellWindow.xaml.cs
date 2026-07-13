@@ -187,8 +187,10 @@ window.addEventListener('DOMContentLoaded', function(){
         try
         {
             int? f(string ch, int i) => _client.Field(ch, i);
-            // Service bank fault (0 V / < 22 V on the 24 V bank) → Important.
-            if (f("00", 8) is int sv && sv / 10.0 < 22.0)
+            // Service bank fault → Important. Only alarm on a PLAUSIBLE low reading: the channel reports
+            // 0.0 V with a -3276.8 A sentinel when the sensor is disconnected/unconfigured (no data), which
+            // is NOT a dead battery. A real 24 V bank in fault still reads several volts, so require ≥ 5 V.
+            if (f("00", 8) is int sv && sv >= 50 && sv / 10.0 < 22.0)
                 list.Add(new NavicoMfdService.Alarm("Important", 1, 1));
             // Any tank critically low (< 15%) → Warning.
             int lowTanks = 0;
@@ -613,7 +615,9 @@ window.addEventListener('DOMContentLoaded', function(){
 
         double waterAvg = Math.Round((waterPort + waterStbd) / 2.0);
         double fuelAvg = Math.Round((fFwdPort + fFwdStbd + fAftPort + fAftStbd) / 4.0);
-        bool serviceLow = serviceV < 22.0; // 24 V bank; below ~22 V is a fault
+        // 0.0 V = disconnected/unconfigured sensor (no data), not a dead battery — don't alarm on it.
+        bool serviceValid = serviceV >= 5.0;
+        bool serviceLow = serviceValid && serviceV < 22.0; // 24 V bank; below ~22 V is a real fault
 
         var live = new
         {
@@ -645,7 +649,7 @@ window.addEventListener('DOMContentLoaded', function(){
             fuelTransfer = new { toTransfer = (int)fuelToTransfer, toGo = (int)fuelToGo },
             waterAvg = (int)waterAvg,
             fuelAvg = (int)fuelAvg,
-            service = new { v = serviceV.ToString("0.0"), low = serviceLow },
+            service = new { v = serviceV.ToString("0.0"), low = serviceLow, noData = !serviceValid },
             alarm = serviceLow,
         };
 
