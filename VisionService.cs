@@ -100,8 +100,13 @@ public sealed class VisionService : IDisposable
     public IReadOnlyList<Detection> Analyze(byte[] jpeg)
     {
         if (_session is null || _inputName is null) return Array.Empty<Detection>();
+        // A valid camera JPEG is comfortably over a few KB; anything tiny is a truncated/failed fetch.
+        // Feeding malformed data to the NATIVE ONNX runtime can raise an uncatchable access violation
+        // that hard-kills the process, so we reject bad frames here before inference.
+        if (jpeg is null || jpeg.Length < 1024) return Array.Empty<Detection>();
 
         var input = Preprocess(jpeg);
+        if (input is null) return Array.Empty<Detection>();   // frame failed to decode to a sane bitmap
         using var results = _session.Run(new[] { NamedOnnxValue.CreateFromTensor(_inputName, input) });
         var output = results.First().AsTensor<float>();   // [1, 84, 8400]
 
@@ -127,10 +132,18 @@ public sealed class VisionService : IDisposable
     }
 
     // Decode + resize to 640×640 (WPF imaging, no external image lib) → NCHW RGB float tensor 0-1.
-    private static DenseTensor<float> Preprocess(byte[] jpeg)
+    // Returns null if the frame won't decode to a valid, non-zero-dimension bitmap — a zero dimension
+    // would make the scale factor Infinity/NaN and hand garbage to the native model (which can crash it).
+    private static DenseTensor<float>? Preprocess(byte[] jpeg)
     {
-        BitmapSource frame = BitmapFrame.Create(new MemoryStream(jpeg),
-            BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
+        BitmapSource frame;
+        try
+        {
+            frame = BitmapFrame.Create(new MemoryStream(jpeg),
+                BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
+        }
+        catch { return null; }
+        if (frame.PixelWidth <= 0 || frame.PixelHeight <= 0) return null;
         var scaled = new TransformedBitmap(frame,
             new ScaleTransform((double)Size / frame.PixelWidth, (double)Size / frame.PixelHeight));
         var bgra = new FormatConvertedBitmap(scaled, PixelFormats.Bgra32, null, 0);
