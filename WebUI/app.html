@@ -351,7 +351,7 @@ function tank(name,pct,color){
   var liq =
     '<div style="position:absolute;left:0;right:0;bottom:0;top:'+liquidTop+'%;">'
       // liquid column with cylindrical shading
-      +'<div style="position:absolute;inset:0;background:linear-gradient(90deg,'
+      +'<div style="position:absolute;top:0;left:0;right:0;bottom:0;background-color:'+color+';background-image:linear-gradient(90deg,'
         +mix(color,55,'#000')+' 0%,'
         +color+' 22%,'
         +mix(color,60,'#fff')+' 46%,'
