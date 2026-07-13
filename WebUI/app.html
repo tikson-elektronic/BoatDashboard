@@ -1127,7 +1127,7 @@ av: function(){
           +'border:1px solid '+(act?'rgba(47,196,209,0.5)':'rgba(255,255,255,0.06)')+';'
           +'box-shadow:'+(act?'inset 0 2px 5px rgba(0,0,0,0.6), 0 0 8px rgba(47,196,209,0.2)':'0 2px 4px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06)')+';'
           +'color:'+(act?'#2fc4d1':'#9fb4be')+';">'+s+'</div>';}).join('')+'</div>'
-        +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;">'+[['NETFLIX','#e50914'],['YOUTUBE','#ff0000'],['PLEX','#e5a00d'],['SPOTIFY','#1db954']].map(function(ap){var act=a.tvApp===ap[0];
+        +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;">'+[['NETFLIX','#e50914'],['YOUTUBE','#ff0000'],['PRIME','#00a8e1'],['SPOTIFY','#1db954']].map(function(ap){var act=a.tvApp===ap[0];
           return '<div onclick="avSet2({tvApp:&quot;'+ap[0]+'&quot;})" style="height:34px;display:flex;align-items:center;justify-content:center;border-radius:17px;font-size:9.5px;font-weight:800;letter-spacing:0.5px;cursor:pointer;'
           +'background:'+(act?ap[1]:'linear-gradient(180deg,#26343f,#1a242d)')+';'
           +'border:1px solid '+(act?ap[1]:'rgba(255,255,255,0.06)')+';'

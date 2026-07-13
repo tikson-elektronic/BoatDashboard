@@ -609,23 +609,34 @@ public sealed class AvService
                 : "Samsung: no MAC known for Wake-on-LAN. Re-add the TV while it's on so I can read its MAC.";
         }
 
-        // App launch (Netflix, YouTube, …). Newer Tizen firmware 404s the REST app endpoint, so we launch
-        // over the SAME authenticated WebSocket used for keypresses, via the ed.apps.launch message.
+        // App launch (Netflix, YouTube, …). The REST launch endpoint works on this TV (POST returns 200);
+        // it just needs the CORRECT per-TV app IDs — several stock IDs 404. IDs below were verified live
+        // against the Q60AA via GET /api/v2/applications/{id} (name match). Launch is unauthenticated REST.
         var apps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["netflix"] = "11101200001", ["youtube"] = "111299001912", ["prime"] = "3201512006785",
-            ["primevideo"] = "3201512006785", ["disney"] = "3201901017640", ["disneyplus"] = "3201901017640",
-            ["spotify"] = "3201606009684", ["hbo"] = "3201601007230", ["hbomax"] = "3201601007230",
-            ["appletv"] = "3201807016597", ["plex"] = "3201512006963", ["twitch"] = "3202203026841",
+            ["netflix"] = "3201907018807", ["youtube"] = "111299001912",
+            ["prime"] = "3201910019365", ["primevideo"] = "3201910019365", ["amazon"] = "3201910019365",
+            ["disney"] = "3201901017640", ["disneyplus"] = "3201901017640",
+            ["spotify"] = "3201606009684", ["hbo"] = "3201601007230", ["hbomax"] = "3201601007230", ["max"] = "3201601007230",
+            ["appletv"] = "3201807016597", ["apple"] = "3201807016597",
         };
-        bool isApp = apps.TryGetValue(action, out var appId);
-        string? key = null;
-        if (!isApp && !keys.TryGetValue(action, out key)) return $"Samsung: unknown action '{action}'.";
-        // The wire payload: an app deep-link, or a remote keypress. Same channel either way.
-        string Payload() => isApp
-            ? JsonSerializer.Serialize(new { method = "ms.channel.emulator", @params = new { data = new { appId, action_type = "DEEP_LINK" }, to = "host", @event = "ed.apps.launch" } })
-            : JsonSerializer.Serialize(new { method = "ms.remote.control", @params = new { Cmd = "Click", DataOfCmd = key, Option = "false", TypeOfRemote = "SendRemoteKey" } });
-        string label = isApp ? action : key;
+        if (apps.TryGetValue(action, out var appId))
+        {
+            try
+            {
+                using var areq = new HttpRequestMessage(HttpMethod.Post, $"http://{d.Ip}:8001/api/v2/applications/{appId}");
+                var ar = await Http.SendAsync(areq);
+                return ar.IsSuccessStatusCode
+                    ? $"Samsung: launched {action}."
+                    : $"Samsung: launch {action} returned HTTP {(int)ar.StatusCode} — app may not be installed under id {appId}.";
+            }
+            catch (Exception ex) { return $"Samsung: launch {action} failed — {ex.Message}"; }
+        }
+
+        if (!keys.TryGetValue(action, out var key)) return $"Samsung: unknown action '{action}'.";
+        // Remote keypress payload for the WebSocket control channel.
+        string Payload() => JsonSerializer.Serialize(new { method = "ms.remote.control", @params = new { Cmd = "Click", DataOfCmd = key, Option = "false", TypeOfRemote = "SendRemoteKey" } });
+        string label = key;
         // Use a stable per-device app name. If we've never paired, and one was tried before, the TV may
         // remember it as denied and refuse (ms.channel.timeOut) — so pick a fresh name until paired.
         // The controller name is the pairing identity: the TV stores an auth token AGAINST this name.
