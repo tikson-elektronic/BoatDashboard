@@ -648,7 +648,7 @@ setInterval(poll,3000);
     {
         // Telemetry/API stay no-store; static assets (images/css/js) get a real max-age so the iPad
         // caches them — otherwise the 1 s dashboard re-render re-fetches the boat image and it blinks.
-        var cache = cacheSeconds > 0 ? $"Cache-Control: max-age={cacheSeconds}" : "Cache-Control: no-store";
+        var cache = cacheSeconds > 0 ? $"Cache-Control: max-age={cacheSeconds}" : "Cache-Control: no-store, no-cache, must-revalidate, max-age=0";
         var header = $"HTTP/1.1 {status}\r\nContent-Type: {contentType}\r\nContent-Length: {body.Length}\r\n" +
                      "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\n" +
                      "Access-Control-Allow-Headers: Content-Type, Authorization\r\n" +

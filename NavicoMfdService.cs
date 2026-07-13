@@ -1,3 +1,4 @@
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -75,10 +76,19 @@ public sealed class NavicoMfdService : IDisposable
         }
     }
 
+    // Cache-buster from app.html's last-write time. The MFD browser caches the page and ignores our
+    // no-store header, so a stale build kept rendering; a changing ?v= makes re-opening fetch fresh HTML.
+    private static string AppVersion()
+    {
+        try { return File.GetLastWriteTimeUtc(Path.Combine(AppContext.BaseDirectory, "WebUI", "app.html")).Ticks.ToString(); }
+        catch { return "1"; }
+    }
+
     // Client Application Link — advertises the app + the URL of our own web UI.
     private void SendCal(UdpClient udp, string ip)
     {
         var baseUrl = $"http://{ip}:{_httpPort}";
+        var v = AppVersion();
         var cal = new Dictionary<string, object?>
         {
             ["Version"] = "1",
@@ -86,9 +96,9 @@ public sealed class NavicoMfdService : IDisposable
             ["FeatureName"] = Feature,
             ["IP"] = ip,
             ["Text"] = new[] { new { Language = "en", Name = "Vessel Monitor" } },
-            ["Image"] = $"{baseUrl}/uploads/mfd-icon.png",
-            ["Icon"] = $"{baseUrl}/uploads/mfd-icon.png",
-            ["URL"] = $"{baseUrl}/",
+            ["Image"] = $"{baseUrl}/uploads/mfd-icon.png?v={v}",
+            ["Icon"] = $"{baseUrl}/uploads/mfd-icon.png?v={v}",
+            ["URL"] = $"{baseUrl}/?v={v}",
             ["BrowserPanel"] = new
             {
                 Enable = true,
