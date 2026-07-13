@@ -24,6 +24,7 @@ public partial class SettingsWindow : Window
 
         ApiKeyBox.Password = settings.ClaudeApiKey;
         KioskCheck.IsChecked = settings.Kiosk;
+        CursorCheck.IsChecked = settings.ShowCursor;
         BootCheck.IsChecked = settings.LaunchAtBoot;
         BlinkCheck.IsChecked = settings.BlinkAlarms;
 
@@ -214,6 +215,7 @@ public partial class SettingsWindow : Window
     {
         Settings.ClaudeApiKey = ApiKeyBox.Password.Trim();
         Settings.Kiosk = KioskCheck.IsChecked == true;
+        Settings.ShowCursor = CursorCheck.IsChecked == true;
         Settings.LaunchAtBoot = BootCheck.IsChecked == true;
         Settings.BlinkAlarms = BlinkCheck.IsChecked == true;
         Settings.LanAllowList = AllowListBox.Text

@@ -21,6 +21,9 @@ public sealed class AppSettings
     /// <summary>Fullscreen, cursor-hidden, always-on-top, close-locked kiosk display.</summary>
     public bool Kiosk { get; set; } = false;
 
+    /// <summary>Show the mouse cursor even in kiosk mode (for mouse/trackpad use on the helm PC).</summary>
+    public bool ShowCursor { get; set; } = true;
+
     /// <summary>Register the app to start automatically at Windows sign-in.</summary>
     public bool LaunchAtBoot { get; set; } = false;
 

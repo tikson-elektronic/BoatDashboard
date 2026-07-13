@@ -78,7 +78,9 @@
                            FontSize="10" Margin="2,8,0,0" TextWrapping="Wrap"/>
 
                 <TextBlock Text="KIOSK / DISPLAY" Style="{StaticResource SectionTitle}" Margin="0,20,0,2"/>
-                <CheckBox x:Name="KioskCheck" Content="Kiosk mode — fullscreen, hide cursor, always on top, locked"
+                <CheckBox x:Name="KioskCheck" Content="Kiosk mode — fullscreen, always on top, locked"
+                          Foreground="{StaticResource TextBrush}" FontSize="13" Margin="2,10,0,0"/>
+                <CheckBox x:Name="CursorCheck" Content="Show mouse cursor (for mouse/trackpad use, even in kiosk)"
                           Foreground="{StaticResource TextBrush}" FontSize="13" Margin="2,10,0,0"/>
                 <CheckBox x:Name="BootCheck" Content="Launch automatically at Windows startup"
                           Foreground="{StaticResource TextBrush}" FontSize="13" Margin="2,10,0,0"/>

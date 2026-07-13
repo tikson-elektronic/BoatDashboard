@@ -498,7 +498,7 @@ window.addEventListener('DOMContentLoaded', function(){
             Width = SystemParameters.PrimaryScreenWidth;
             Height = SystemParameters.PrimaryScreenHeight;
             Topmost = true;
-            Cursor = Cursors.None;
+            Cursor = _settings.ShowCursor ? null : Cursors.None;
         }
         else
         {
@@ -518,7 +518,7 @@ window.addEventListener('DOMContentLoaded', function(){
     {
         var core = Web.CoreWebView2;
         if (core is null) return;
-        var css = _kiosk ? "*{cursor:none !important;}" : "";
+        var css = (_kiosk && !_settings.ShowCursor) ? "*{cursor:none !important;}" : "";
         _ = core.ExecuteScriptAsync(
             "(function(){var s=document.getElementById('__vcur')||document.createElement('style');" +
             "s.id='__vcur';s.textContent=" + JsonSerializer.Serialize(css) + ";" +

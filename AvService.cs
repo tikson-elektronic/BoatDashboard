@@ -59,6 +59,31 @@ public sealed class AvService
         return new();
     }
     internal static string? GetToken(string id) => _tokens.TryGetValue(id, out var t) ? t : null;
+
+    // Samsung ties its auth token to the CONTROLLER NAME we present. We pin the name that actually
+    // paired (alongside the token) so every later connect reuses it; until paired we mint a fresh name
+    // each run so a stale/denied TV entry can't silently block us.
+    private static readonly string NamesFile = @"C:\voms\av-samsung-names.json";
+    private static Dictionary<string, string>? _samsungNames;
+    private static Dictionary<string, string> SamsungNames()
+    {
+        if (_samsungNames != null) return _samsungNames;
+        try { _samsungNames = File.Exists(NamesFile) ? JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(NamesFile)) ?? new() : new(); }
+        catch { _samsungNames = new(); }
+        return _samsungNames;
+    }
+    private static void PinSamsungName(string id, string name)
+    {
+        var map = SamsungNames();
+        lock (map) { map[id] = name; try { Directory.CreateDirectory(Path.GetDirectoryName(NamesFile)!); File.WriteAllText(NamesFile, JsonSerializer.Serialize(map)); } catch { } }
+    }
+    private static string SamsungPairName(string id, bool hasToken)
+    {
+        var map = SamsungNames();
+        if (map.TryGetValue(id, out var pinned) && !string.IsNullOrEmpty(pinned)) return pinned;
+        // Not yet paired on this TV → fresh name forces a clean Allow prompt. Persisted only on success.
+        return "Lagoon630-" + Guid.NewGuid().ToString("N").Substring(0, 4).ToUpperInvariant();
+    }
     internal static void SaveToken(string id, string token)
     {
         try
@@ -545,22 +570,27 @@ public sealed class AvService
         var keys = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             // power / volume
-            ["power"] = "KEY_POWER", ["power_off"] = "KEY_POWER", ["vol_up"] = "KEY_VOLUP", ["vol_down"] = "KEY_VOLDOWN", ["mute"] = "KEY_MUTE",
+            ["power"] = "KEY_POWER", ["power_off"] = "KEY_POWER", ["poweroff"] = "KEY_POWER",
+            ["vol_up"] = "KEY_VOLUP", ["volume_up"] = "KEY_VOLUP", ["vol_down"] = "KEY_VOLDOWN", ["volume_down"] = "KEY_VOLDOWN",
+            ["mute"] = "KEY_MUTE", ["unmute"] = "KEY_MUTE",   // KEY_MUTE toggles
             // navigation
             ["home"] = "KEY_HOME", ["up"] = "KEY_UP", ["down"] = "KEY_DOWN", ["left"] = "KEY_LEFT", ["right"] = "KEY_RIGHT",
-            ["select"] = "KEY_ENTER", ["ok"] = "KEY_ENTER", ["back"] = "KEY_RETURN", ["exit"] = "KEY_EXIT",
+            ["select"] = "KEY_ENTER", ["enter"] = "KEY_ENTER", ["ok"] = "KEY_ENTER", ["back"] = "KEY_RETURN", ["return"] = "KEY_RETURN", ["exit"] = "KEY_EXIT",
             // menus / settings / info
             ["menu"] = "KEY_MENU", ["settings"] = "KEY_MENU", ["tools"] = "KEY_TOOLS", ["info"] = "KEY_INFO",
-            ["guide"] = "KEY_GUIDE", ["smarthub"] = "KEY_HOME",
+            ["guide"] = "KEY_GUIDE", ["smarthub"] = "KEY_HOME", ["hub"] = "KEY_HOME", ["contents"] = "KEY_CONTENTS",
+            ["caption"] = "KEY_CAPTION", ["subtitle"] = "KEY_CAPTION", ["sleep"] = "KEY_SLEEP", ["extra"] = "KEY_MORE",
             // channels
             ["ch_up"] = "KEY_CHUP", ["channel_up"] = "KEY_CHUP", ["ch_down"] = "KEY_CHDOWN", ["channel_down"] = "KEY_CHDOWN",
-            ["ch_list"] = "KEY_CH_LIST",
+            ["ch_list"] = "KEY_CH_LIST", ["prech"] = "KEY_PRECH", ["last"] = "KEY_PRECH",
             // inputs / source
             ["source"] = "KEY_SOURCE", ["input"] = "KEY_SOURCE", ["hdmi"] = "KEY_HDMI",
             ["hdmi1"] = "KEY_HDMI1", ["hdmi2"] = "KEY_HDMI2", ["hdmi3"] = "KEY_HDMI3", ["hdmi4"] = "KEY_HDMI4",
-            ["tv"] = "KEY_TV",
+            ["tv"] = "KEY_TV", ["dtv"] = "KEY_DTV", ["antenna"] = "KEY_ANTENA",
             // transport
-            ["play"] = "KEY_PLAY", ["pause"] = "KEY_PAUSE", ["stop"] = "KEY_STOP", ["rewind"] = "KEY_REWIND", ["ff"] = "KEY_FF",
+            ["play"] = "KEY_PLAY", ["pause"] = "KEY_PAUSE", ["playpause"] = "KEY_PLAY_BACK", ["stop"] = "KEY_STOP",
+            ["rewind"] = "KEY_REWIND", ["rw"] = "KEY_REWIND", ["ff"] = "KEY_FF", ["fastforward"] = "KEY_FF",
+            ["record"] = "KEY_REC", ["next"] = "KEY_FF_", ["prev"] = "KEY_REWIND_",
             // number pad
             ["0"] = "KEY_0", ["1"] = "KEY_1", ["2"] = "KEY_2", ["3"] = "KEY_3", ["4"] = "KEY_4",
             ["5"] = "KEY_5", ["6"] = "KEY_6", ["7"] = "KEY_7", ["8"] = "KEY_8", ["9"] = "KEY_9",
@@ -579,7 +609,8 @@ public sealed class AvService
                 : "Samsung: no MAC known for Wake-on-LAN. Re-add the TV while it's on so I can read its MAC.";
         }
 
-        // App launch (Netflix, YouTube, …) — Tizen launches apps via a REST call, not a keypress.
+        // App launch (Netflix, YouTube, …). Newer Tizen firmware 404s the REST app endpoint, so we launch
+        // over the SAME authenticated WebSocket used for keypresses, via the ed.apps.launch message.
         var apps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["netflix"] = "11101200001", ["youtube"] = "111299001912", ["prime"] = "3201512006785",
@@ -587,21 +618,22 @@ public sealed class AvService
             ["spotify"] = "3201606009684", ["hbo"] = "3201601007230", ["hbomax"] = "3201601007230",
             ["appletv"] = "3201807016597", ["plex"] = "3201512006963", ["twitch"] = "3202203026841",
         };
-        if (apps.TryGetValue(action, out var appId))
-        {
-            try
-            {
-                using var req = new HttpRequestMessage(HttpMethod.Post, $"http://{d.Ip}:8001/api/v2/applications/{appId}");
-                var r = await Http.SendAsync(req);
-                return r.IsSuccessStatusCode ? $"Samsung: launched {action}." : $"Samsung: launch {action} returned {(int)r.StatusCode} (some Tizen firmware blocks REST app-launch).";
-            }
-            catch (Exception ex) { return $"Samsung: launch {action} failed — {ex.Message}"; }
-        }
-
-        if (!keys.TryGetValue(action, out var key)) return $"Samsung: unknown action '{action}'.";
+        bool isApp = apps.TryGetValue(action, out var appId);
+        string? key = null;
+        if (!isApp && !keys.TryGetValue(action, out key)) return $"Samsung: unknown action '{action}'.";
+        // The wire payload: an app deep-link, or a remote keypress. Same channel either way.
+        string Payload() => isApp
+            ? JsonSerializer.Serialize(new { method = "ms.channel.emulator", @params = new { data = new { appId, action_type = "DEEP_LINK" }, to = "host", @event = "ed.apps.launch" } })
+            : JsonSerializer.Serialize(new { method = "ms.remote.control", @params = new { Cmd = "Click", DataOfCmd = key, Option = "false", TypeOfRemote = "SendRemoteKey" } });
+        string label = isApp ? action : key;
         // Use a stable per-device app name. If we've never paired, and one was tried before, the TV may
         // remember it as denied and refuse (ms.channel.timeOut) — so pick a fresh name until paired.
-        d.SamsungAppName ??= "Vessel Monitor";
+        // The controller name is the pairing identity: the TV stores an auth token AGAINST this name.
+        // If a name was authorised before but its token got lost, reconnecting with the same name and no
+        // token makes Tizen reject instantly (timeOut/unauthorized) without re-prompting. So when we have
+        // NO saved token, present a fresh name to force a clean Allow prompt; once paired, the name is
+        // pinned in _samsungNames so the saved token keeps matching it on every later connect.
+        d.SamsungAppName ??= SamsungPairName(d.Id, !string.IsNullOrEmpty(d.ClientKey));
         var name = Convert.ToBase64String(Encoding.UTF8.GetBytes(d.SamsungAppName));
 
         // Modern Samsung (2016+) uses secure wss:8002 with a token issued on first authorisation.
@@ -622,10 +654,9 @@ public sealed class AvService
             using var cts2 = new CancellationTokenSource(TimeSpan.FromSeconds(6));
             try { await ws2.ConnectAsync(new Uri($"ws://{d.Ip}:8001/api/v2/channels/samsung.remote.control?name={name}"), cts2.Token); }
             catch { return "Samsung: connect failed — accept the authorisation prompt on the TV, then retry."; }
-            var m = JsonSerializer.Serialize(new { method = "ms.remote.control", @params = new { Cmd = "Click", DataOfCmd = key, Option = "false", TypeOfRemote = "SendRemoteKey" } });
-            await ws2.SendAsync(Encoding.UTF8.GetBytes(m), WebSocketMessageType.Text, true, cts2.Token);
+            await ws2.SendAsync(Encoding.UTF8.GetBytes(Payload()), WebSocketMessageType.Text, true, cts2.Token);
             try { await ws2.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts2.Token); } catch { }
-            return $"Samsung {key} sent (legacy).";
+            return $"Samsung {label} sent (legacy).";
         }
 
         // On first pairing the TV shows an "Allow BoatDashboard" prompt and only issues the auth token
@@ -651,7 +682,7 @@ public sealed class AvService
                     var root = doc.RootElement;
                     var ev = root.TryGetProperty("event", out var e) ? e.GetString() : "";
                     if (root.TryGetProperty("data", out var data) && data.TryGetProperty("token", out var tok) && tok.GetString() is { Length: > 0 } t)
-                    { d.ClientKey = t; SaveToken(d.Id, t); break; }    // accepted → token issued (persist it)
+                    { d.ClientKey = t; SaveToken(d.Id, t); PinSamsungName(d.Id, d.SamsungAppName!); break; }    // accepted → token issued (persist token + the name it was issued against)
                     if (ev == "ms.channel.unauthorized") { denied = true; break; }  // user tapped Deny
                     if (ev == "ms.channel.timeOut") { timedOut = true; break; }     // TV refused the secure channel
                     if (hadToken && ev == "ms.channel.connect") break; // already authorised
@@ -663,10 +694,9 @@ public sealed class AvService
         // Authorised (token captured on 8002, or we already had one) → send the key and finish.
         if (!string.IsNullOrEmpty(d.ClientKey) || hadToken)
         {
-            var okMsg = JsonSerializer.Serialize(new { method = "ms.remote.control", @params = new { Cmd = "Click", DataOfCmd = key, Option = "false", TypeOfRemote = "SendRemoteKey" } });
-            try { await ws.SendAsync(Encoding.UTF8.GetBytes(okMsg), WebSocketMessageType.Text, true, cts.Token); } catch { }
+            try { await ws.SendAsync(Encoding.UTF8.GetBytes(Payload()), WebSocketMessageType.Text, true, cts.Token); } catch { }
             try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token); } catch { }
-            return $"Samsung {key} sent (paired).";
+            return $"Samsung {label} sent (paired).";
         }
         if (denied)
         {
@@ -701,20 +731,18 @@ public sealed class AvService
             }
             if (legacyReady)
             {
-                var lmsg = JsonSerializer.Serialize(new { method = "ms.remote.control", @params = new { Cmd = "Click", DataOfCmd = key, Option = "false", TypeOfRemote = "SendRemoteKey" } });
-                try { await lg.SendAsync(Encoding.UTF8.GetBytes(lmsg), WebSocketMessageType.Text, true, lcts.Token); } catch { }
+                try { await lg.SendAsync(Encoding.UTF8.GetBytes(Payload()), WebSocketMessageType.Text, true, lcts.Token); } catch { }
                 await Task.Delay(400);
                 try { await lg.CloseAsync(WebSocketCloseStatus.NormalClosure, "", lcts.Token); } catch { }
                 d.ClientKey ??= "legacy";   // mark paired via legacy channel
-                return $"Samsung {key} sent (legacy 8001 ✓).";
+                return $"Samsung {label} sent (legacy 8001).";
             }
             try { await lg.CloseAsync(WebSocketCloseStatus.NormalClosure, "", lcts.Token); } catch { }
         }
 
         if (denied) return "Samsung: you tapped Deny on the TV - re-run and choose Allow to pair.";
-        return "Samsung: the TV refused the control channel (instant timeout on both 8002 and 8001). "
-             + "This is the TV blocking remote apps: turn ON Settings > General > External Device Manager > "
-             + "Device Connect Manager > Access Notification, remove any old device entry there, then try once more.";
+        return "Samsung: no Allow prompt appeared and the TV rejected both channels. Presenting a fresh "
+             + $"controller name ('{d.SamsungAppName}') next run should force a new prompt — accept it on the TV to pair.";
     }
 
     // ---- LG webOS (SSAP WebSocket) ----
