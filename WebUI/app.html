@@ -297,8 +297,10 @@
     <div style="display:flex;align-items:center;gap:10px;"><span class="dot"></span><span style="font-size:13px;font-weight:600;letter-spacing:2px;color:#9fb4be;">LINKED</span></div>
     <div id="clock" class="cond" style="font-size:22px;font-weight:600;min-width:56px;text-align:right;"></div>
   </div>
+  <!-- Persistent nav strip for the MFD/LAN (touch): always visible, no tap-to-open menu needed. -->
+  <div id="mfdNav" style="display:none;flex-shrink:0;align-items:center;gap:7px;padding:8px 14px;overflow-x:auto;background:#0b1218;border-bottom:1px solid #1f2b34;white-space:nowrap;"></div>
   <div style="flex:1;display:flex;min-height:0;">
-    
+
     <div id="main" style="flex:1;overflow:auto;padding:28px 36px;min-width:0;"></div>
   </div>
 </div>
@@ -1410,8 +1412,21 @@ window.avDevices=function(json){try{S.av.devices=(typeof json==="string")?JSON.p
 function avDiscover(){S.av.scanning=true;if(S.screen==="av")render();if(window.__remote){fetch("/api/av/discover",{method:"POST"}).then(function(r){return r.json();}).then(function(d){window.avScanning(false);window.avDevices(d);});}else{window.chrome.webview.postMessage({cmd:"av_discover"});}}
 function avCtrl(id,action,value){if(window.__remote){fetch("/api/av/control",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:id,action:action,value:value||""})}).catch(function(){});}else{window.chrome.webview.postMessage({cmd:"av_control",device:id,action:action,value:value||""});}}
 function avAccept(id){try{window.chrome.webview.postMessage({cmd:"av_accept",device:id});}catch(e){}S.assist.msgs.push({t:"Added it. Controllable from the AV screen now.",u:false});render();}
+// Persistent MFD/LAN nav strip — rebuilt each render to reflect the active screen. Direct-tap navigation,
+// no menu to open (the MFD couldn't reliably drive the radial ring or the tap-to-open menu).
+function renderMfdNav(){
+  var el=document.getElementById('mfdNav'); if(!el)return;
+  if(!window.__remote){el.style.display='none';return;}
+  el.style.display='flex';
+  el.innerHTML=NAV.map(function(n){var a=n[0]===S.screen;
+    return '<div onclick="navPick(&quot;'+n[0]+'&quot;)" style="flex:0 0 auto;padding:10px 15px;border-radius:8px;font-size:14px;font-weight:700;letter-spacing:0.5px;font-family:Barlow Condensed,sans-serif;cursor:pointer;user-select:none;'
+      +'background:'+(a?'linear-gradient(180deg,#1d3a41,#16333a)':'rgba(255,255,255,0.04)')+';'
+      +'border:1px solid '+(a?'rgba(47,196,209,0.6)':'rgba(255,255,255,0.08)')+';'
+      +'color:'+(a?'#2fc4d1':'#c2d2da')+';">'+n[1]+'</div>';}).join('');
+}
 function render(){
   document.getElementById('main').innerHTML = SCREENS[S.screen]();
+  renderMfdNav();
   if(!S.alarm && !S._testing) S._acked=false;   // reset ack once the alarm clears, so a new one shows again
   document.getElementById('alarmChip').style.display = ((S.alarm||S._testing) && !S._acked) ? 'flex' : 'none';
   var app=document.getElementById('app');
