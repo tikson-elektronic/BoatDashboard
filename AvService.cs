@@ -711,25 +711,43 @@ public sealed class AvService
         // Modern Samsung (2016+) uses secure wss:8002 with a token issued on first authorisation.
         // We accept the TV's self-signed cert, capture the token from the connect frame, and persist it
         // so later commands are silent. Fall back to legacy ws:8001 for older sets.
-        using var ws = new ClientWebSocket();
-        ws.Options.RemoteCertificateValidationCallback = (_, _, _, _) => true;   // TV serves a self-signed cert
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
-
         string tokenQs = string.IsNullOrEmpty(d.ClientKey) ? "" : $"&token={d.ClientKey}";
-        bool secure = true;
-        try { await ws.ConnectAsync(new Uri($"wss://{d.Ip}:8002/api/v2/channels/samsung.remote.control?name={name}{tokenQs}"), cts.Token); Ip2slClient.Log($"[samsung] wss:8002 connected state={ws.State}"); }
-        catch (Exception cex)
+        bool paired = !string.IsNullOrEmpty(d.ClientKey);
+        var wssUri = new Uri($"wss://{d.Ip}:8002/api/v2/channels/samsung.remote.control?name={name}{tokenQs}");
+
+        // Connect the SECURE channel, retrying when we already hold a token — over Wi-Fi the TLS+WS
+        // handshake regularly needs more than a few seconds. Retrying beats the alternative of dropping to
+        // legacy ws:8001, which ignores the token and makes the TV pop the Allow prompt on EVERY command.
+        async Task<ClientWebSocket?> ConnectSecureAsync(int tries)
         {
-            Ip2slClient.Log("[samsung] wss:8002 connect failed: " + cex.Message + " -> trying legacy ws:8001");
-            secure = false;
-            using var ws2 = new ClientWebSocket();
-            using var cts2 = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+            for (int a = 0; a < tries; a++)
+            {
+                var w = new ClientWebSocket();
+                w.Options.RemoteCertificateValidationCallback = (_, _, _, _) => true;   // TV serves a self-signed cert
+                try { using var c = new CancellationTokenSource(TimeSpan.FromSeconds(15)); await w.ConnectAsync(wssUri, c.Token); return w; }
+                catch (Exception cex) { Ip2slClient.Log($"[samsung] wss:8002 attempt {a + 1} failed: {cex.Message}"); try { w.Dispose(); } catch { } }
+            }
+            return null;
+        }
+
+        var wsN = await ConnectSecureAsync(paired ? 3 : 1);
+        if (wsN is null)
+        {
+            // Paired but the secure channel wouldn't connect → do NOT use legacy (it re-prompts); ask to retry.
+            if (paired) return "Samsung: the TV's secure channel didn't answer (Wi-Fi latency) — try that again.";
+            // Unpaired: legacy ws:8001 surfaces the Allow prompt for first-time pairing.
+            var ws2 = new ClientWebSocket();
+            using var cts2 = new CancellationTokenSource(TimeSpan.FromSeconds(8));
             try { await ws2.ConnectAsync(new Uri($"ws://{d.Ip}:8001/api/v2/channels/samsung.remote.control?name={name}"), cts2.Token); }
-            catch { return "Samsung: connect failed — accept the authorisation prompt on the TV, then retry."; }
+            catch { ws2.Dispose(); return "Samsung: connect failed — accept the authorisation prompt on the TV, then retry."; }
             await ws2.SendAsync(Encoding.UTF8.GetBytes(Payload()), WebSocketMessageType.Text, true, cts2.Token);
             try { await ws2.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts2.Token); } catch { }
+            ws2.Dispose();
             return $"Samsung {label} sent (legacy).";
         }
+        using var ws = wsN;
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));   // for the reads/sends below
+        Ip2slClient.Log($"[samsung] wss:8002 connected state={ws.State}");
 
         // On first pairing the TV shows an "Allow BoatDashboard" prompt and only issues the auth token
         // AFTER the user accepts. The prompt stays up only while a client is connected — so if we don't
