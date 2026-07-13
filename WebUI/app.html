@@ -1597,6 +1597,7 @@ window.camDetections=function(i,dets){S.camDets=S.camDets||{};try{S.camDets[i]=(
 window._camSrc=window._camSrc||{};
 var _camBusy={};
 function refreshCam(i){
+  if(!window.__remote)return;   // WebView gets frames pushed via camFrame(); only LAN browsers fetch
   if(_camBusy[i])return; _camBusy[i]=true;
   fetch("/api/cam?i="+i,{cache:"no-store"}).then(function(r){return r.ok?r.blob():Promise.reject(r.status);})
     .then(function(b){
@@ -1609,7 +1610,16 @@ function refreshCam(i){
     }).catch(function(){_camBusy[i]=false;});
 }
 function refreshAllCams(){if(!(S.camList&&S.camList.length))return;for(var i=0;i<S.camList.length;i++)refreshCam(i);}
-setInterval(function(){ if(S.screen==="cameras")refreshAllCams(); },4000);
+// LAN browsers fetch /api/cam (LocalServer serves it fine). The WebView cannot — WebView2 doesn't
+// intercept fetch() to the virtual host — so there the host app PUSHES frames via window.camFrame below.
+setInterval(function(){ if(S.screen==="cameras"&&window.__remote)refreshAllCams(); },4000);
+// Host-pushed frame (WebView path): a ready-to-use data: URL. Cache it and swap live tiles in place.
+window.camFrame=function(i,dataUrl){
+  if(!dataUrl)return;
+  window._camSrc[i]=dataUrl;
+  var els=document.querySelectorAll('[data-cam="'+i+'"]');
+  for(var k=0;k<els.length;k++){els[k].src=dataUrl;els[k].style.opacity=1;}
+};
 // Remote (LAN browser) fetches the list itself; the WebView gets it pushed via camApply.
 if(window.__remote){fetch("/api/cameras").then(function(r){return r.json();}).then(function(d){window.camApply(d);}).catch(function(){});}
 function engToggle(){S.engines.running=!S.engines.running;render();}

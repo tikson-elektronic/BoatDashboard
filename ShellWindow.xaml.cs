@@ -119,7 +119,7 @@ window.addEventListener('DOMContentLoaded', function(){
 
         await core.AddScriptToExecuteOnDocumentCreatedAsync(BridgeJs);
         core.WebMessageReceived += OnWebMessage;
-        core.NavigationCompleted += (_, _) => { ApplyCursor(); ApplyBlink(); PushAssistantState(); PushCameras(); };
+        core.NavigationCompleted += (_, _) => { ApplyCursor(); ApplyBlink(); PushAssistantState(); PushCameras(); StartCameraPush(); };
         // Self-heal: if the WebView render/browser process dies, reload the UI instead of showing a blank screen.
         core.ProcessFailed += (_, args) =>
         {
@@ -435,6 +435,38 @@ window.addEventListener('DOMContentLoaded', function(){
         _ = Web.CoreWebView2?.ExecuteScriptAsync($"window.camApply({json})");
     }
 
+    private CancellationTokenSource? _camPushCts;
+    /// <summary>Streams camera frames INTO the WebView as data: URLs. WebView2's WebResourceRequested does
+    /// not intercept fetch() to the virtual host (the folder mapping swallows it → "Failed to fetch"), so
+    /// the in-page fetch never worked. Fetching server-side and pushing the bytes as a data URL sidesteps
+    /// the WebView network stack entirely, so feeds render reliably. (LAN browsers still use /api/cam.)</summary>
+    private void StartCameraPush()
+    {
+        if (_camPushCts is not null) return;   // already running
+        _camPushCts = new CancellationTokenSource();
+        var ct = _camPushCts.Token;
+        _ = Task.Run(async () =>
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                var cams = _settings.Cameras ?? new();
+                for (int i = 0; i < cams.Count && !ct.IsCancellationRequested; i++)
+                {
+                    if (string.IsNullOrWhiteSpace(cams[i].Url)) continue;
+                    byte[]? jpeg = null;
+                    try { jpeg = await LocalServer.FetchSnapshotAsync(cams[i].Url); } catch { }
+                    if (jpeg is null || jpeg.Length < 1024) continue;
+                    var dataUrl = "data:image/jpeg;base64," + Convert.ToBase64String(jpeg);
+                    int idx = i;
+                    try { await Dispatcher.InvokeAsync(() =>
+                        Web.CoreWebView2?.ExecuteScriptAsync($"window.camFrame&&window.camFrame({idx},{JsonSerializer.Serialize(dataUrl)})")); }
+                    catch { }
+                }
+                try { await Task.Delay(TimeSpan.FromSeconds(3), ct); } catch { break; }
+            }
+        }, ct);
+    }
+
     /// <summary>Serves /api/cameras and /api/cam?i=N to the WebView, same-origin, so camera feeds render
     /// without a mixed-content block. Camera frames are fetched server-side (any HTTP/MJPEG source).</summary>
     private async void OnWebResourceRequested(object? sender, CoreWebView2WebResourceRequestedEventArgs e)
@@ -467,7 +499,7 @@ window.addEventListener('DOMContentLoaded', function(){
                     : env.CreateWebResourceResponse(null, 502, "Bad Gateway", "");
             }
         }
-        catch { }
+        catch (Exception ex) { Ip2slClient.Log("[webreq] handler EXCEPTION: " + ex); }
         finally { deferral.Complete(); }
     }
 
