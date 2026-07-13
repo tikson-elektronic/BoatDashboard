@@ -753,86 +753,71 @@ public sealed class AvService
         // AFTER the user accepts. The prompt stays up only while a client is connected — so if we don't
         // already have a token, HOLD the connection open and keep reading until the token arrives (up to
         // 40 s, giving the user time to grab the remote and accept). With a token, just a quick read.
-        bool hadToken = !string.IsNullOrEmpty(d.ClientKey);
-        bool denied = false, timedOut = false;
-        var buf = new byte[8192];
-        var deadline = DateTime.UtcNow.AddSeconds(hadToken ? 4 : 40);
-        using (var readCts = new CancellationTokenSource(TimeSpan.FromSeconds(hadToken ? 4 : 42)))
+        // Wait for the TV's connect result and capture any token it issues. Report success ONLY on a real
+        // ms.channel.connect — a stored token can be stale (the TV then re-prompts), and we MUST persist the
+        // fresh token issued on Allow or every command keeps prompting. `seconds` gives time to tap Allow.
+        async Task<bool> AwaitAuthAsync(ClientWebSocket sock, int seconds)
         {
-            while (DateTime.UtcNow < deadline && string.IsNullOrEmpty(d.ClientKey))
+            var rbuf = new byte[8192];
+            using var rc = new CancellationTokenSource(TimeSpan.FromSeconds(seconds + 2));
+            var dl = DateTime.UtcNow.AddSeconds(seconds);
+            while (DateTime.UtcNow < dl)
             {
-                WebSocketReceiveResult res;
-                try { res = await ws.ReceiveAsync(buf, readCts.Token); }
-                catch (Exception rex) { Ip2slClient.Log("[samsung] receive ended: " + rex.Message); break; }
-                var frame = Encoding.UTF8.GetString(buf, 0, res.Count);
-                Ip2slClient.Log("[samsung] frame: " + (frame.Length > 180 ? frame[..180] : frame));
+                WebSocketReceiveResult r;
+                try { r = await sock.ReceiveAsync(rbuf, rc.Token); }
+                catch (Exception rex) { Ip2slClient.Log("[samsung] receive ended: " + rex.Message); return false; }
+                var fr = Encoding.UTF8.GetString(rbuf, 0, r.Count);
+                Ip2slClient.Log("[samsung] frame: " + (fr.Length > 160 ? fr[..160] : fr));
                 try
                 {
-                    using var doc = JsonDocument.Parse(frame);
+                    using var doc = JsonDocument.Parse(fr);
                     var root = doc.RootElement;
                     var ev = root.TryGetProperty("event", out var e) ? e.GetString() : "";
                     if (root.TryGetProperty("data", out var data) && data.TryGetProperty("token", out var tok) && tok.GetString() is { Length: > 0 } t)
-                    { d.ClientKey = t; SaveToken(d.Id, t); PinSamsungName(d.Id, d.SamsungAppName!); break; }    // accepted → token issued (persist token + the name it was issued against)
-                    if (ev == "ms.channel.unauthorized") { denied = true; break; }  // user tapped Deny
-                    if (ev == "ms.channel.timeOut") { timedOut = true; break; }     // TV refused the secure channel
-                    if (hadToken && ev == "ms.channel.connect") break; // already authorised
+                    { d.ClientKey = t; SaveToken(d.Id, t); PinSamsungName(d.Id, d.SamsungAppName!); }
+                    if (ev == "ms.channel.connect") return true;      // authorised (valid token, or just accepted)
+                    if (ev == "ms.channel.timeOut") return false;     // refused, no prompt
+                    // ms.channel.unauthorized → the Allow prompt is showing; keep waiting for the user to accept.
                 }
                 catch { }
             }
+            return false;
+        }
+        async Task<bool> SendKeyAsync(ClientWebSocket sock)
+        {
+            try { await sock.SendAsync(Encoding.UTF8.GetBytes(Payload()), WebSocketMessageType.Text, true, cts.Token); return true; }
+            catch { return false; }
         }
 
-        // Authorised (token captured on 8002, or we already had one) → send the key and finish.
-        if (!string.IsNullOrEmpty(d.ClientKey) || hadToken)
+        // Phase 1 — presented a token: give the TV a few seconds to accept it silently.
+        if (paired && await AwaitAuthAsync(ws, 6))
         {
-            try { await ws.SendAsync(Encoding.UTF8.GetBytes(Payload()), WebSocketMessageType.Text, true, cts.Token); } catch { }
+            await SendKeyAsync(ws);
             try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token); } catch { }
             return $"Samsung {label} sent (paired).";
         }
-        if (denied)
+
+        // Phase 2 — no token, or the token was rejected. Do a CLEAN re-pair: drop the stale token, reconnect
+        // with a brand-new controller name and NO token so the TV shows a fresh Allow prompt, then capture
+        // the new token it issues so all later commands are silent. This is the one-and-only Allow tap.
+        try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None); } catch { }
+        if (paired) { d.ClientKey = null; Ip2slClient.Log("[samsung] stored token rejected — re-pairing"); }
+        d.SamsungAppName = "Lagoon630-" + Guid.NewGuid().ToString("N")[..4].ToUpperInvariant();   // fresh name → clean prompt
+        var name2 = Convert.ToBase64String(Encoding.UTF8.GetBytes(d.SamsungAppName));
+        var pairWs = new ClientWebSocket();
+        pairWs.Options.RemoteCertificateValidationCallback = (_, _, _, _) => true;
+        try { using var pc = new CancellationTokenSource(TimeSpan.FromSeconds(15)); await pairWs.ConnectAsync(new Uri($"wss://{d.Ip}:8002/api/v2/channels/samsung.remote.control?name={name2}"), pc.Token); }
+        catch (Exception pex) { pairWs.Dispose(); Ip2slClient.Log("[samsung] pair connect failed: " + pex.Message); return "Samsung: couldn't reach the TV to pair — try again in a moment."; }
+        using var _pairWs = pairWs;
+        Ip2slClient.Log("[samsung] pairing with fresh name — waiting for Allow on the TV");
+        if (await AwaitAuthAsync(pairWs, 40))
         {
-            try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token); } catch { }
-            return "Samsung: you tapped Deny on the TV - re-run and choose Allow to pair.";
+            await SendKeyAsync(pairWs);
+            try { await pairWs.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token); } catch { }
+            return $"Samsung {label} sent (paired).";
         }
-
-        // Secure channel refused (instant timeOut, no prompt) → fall back to the LEGACY ws:8001 channel.
-        // Many sets accept unpaired clients there, or at least surface the Allow prompt that 8002 won't.
-        if (timedOut && string.IsNullOrEmpty(d.ClientKey))
-        {
-            try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None); } catch { }
-            Ip2slClient.Log("[samsung] 8002 refused (timeOut) -> trying legacy ws:8001");
-            using var lg = new ClientWebSocket();
-            using var lcts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
-            try { await lg.ConnectAsync(new Uri($"ws://{d.Ip}:8001/api/v2/channels/samsung.remote.control?name={name}"), lcts.Token); }
-            catch (Exception lex) { Ip2slClient.Log("[samsung] 8001 connect failed: " + lex.Message); return "Samsung: TV refused both control channels — enable Settings > General > External Device Manager > Device Connect Manager > Access Notification on the TV."; }
-
-            bool legacyReady = false;
-            var ldeadline = DateTime.UtcNow.AddSeconds(40);
-            while (DateTime.UtcNow < ldeadline)
-            {
-                WebSocketReceiveResult lres;
-                try { lres = await lg.ReceiveAsync(buf, lcts.Token); }
-                catch (Exception rex) { Ip2slClient.Log("[samsung] 8001 receive ended: " + rex.Message); break; }
-                var lframe = Encoding.UTF8.GetString(buf, 0, lres.Count);
-                Ip2slClient.Log("[samsung] 8001 frame: " + (lframe.Length > 180 ? lframe[..180] : lframe));
-                if (lframe.Contains("ms.channel.connect")) { legacyReady = true; break; }
-                // 'unauthorized' = the Allow prompt is showing / not yet accepted. KEEP WAITING for the
-                // user to tap Allow (which then sends ms.channel.connect). Don't treat it as a denial.
-                if (lframe.Contains("ms.channel.timeOut")) break;
-            }
-            if (legacyReady)
-            {
-                try { await lg.SendAsync(Encoding.UTF8.GetBytes(Payload()), WebSocketMessageType.Text, true, lcts.Token); } catch { }
-                await Task.Delay(400);
-                try { await lg.CloseAsync(WebSocketCloseStatus.NormalClosure, "", lcts.Token); } catch { }
-                d.ClientKey ??= "legacy";   // mark paired via legacy channel
-                return $"Samsung {label} sent (legacy 8001).";
-            }
-            try { await lg.CloseAsync(WebSocketCloseStatus.NormalClosure, "", lcts.Token); } catch { }
-        }
-
-        if (denied) return "Samsung: you tapped Deny on the TV - re-run and choose Allow to pair.";
-        return "Samsung: no Allow prompt appeared and the TV rejected both channels. Presenting a fresh "
-             + $"controller name ('{d.SamsungAppName}') next run should force a new prompt — accept it on the TV to pair.";
+        try { await pairWs.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token); } catch { }
+        return "Samsung: tap ALLOW on the TV when the prompt appears — after that it stays paired.";
     }
 
     // ---- LG webOS (SSAP WebSocket) ----
