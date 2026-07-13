@@ -3,6 +3,7 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Runtime.InteropServices;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Text;
@@ -60,6 +61,23 @@ public sealed class AvService
     }
     internal static string? GetToken(string id) => _tokens.TryGetValue(id, out var t) ? t : null;
 
+    // Persisted MAC addresses. A TV only reports its MAC over its HTTP API while it's ON, but Wake-on-LAN
+    // is needed precisely when it's OFF — so once we learn a MAC we save it and reuse it forever.
+    private static readonly string MacFile = @"C:\voms\av-macs.json";
+    private static readonly Dictionary<string, string> _macs = LoadMacs();
+    private static Dictionary<string, string> LoadMacs()
+    {
+        try { if (File.Exists(MacFile)) return JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(MacFile)) ?? new(); }
+        catch { }
+        return new();
+    }
+    internal static string? GetMac(string id) => _macs.TryGetValue(id, out var m) ? m : null;
+    internal static void SaveMac(string id, string mac)
+    {
+        try { lock (_macs) { _macs[id] = mac; Directory.CreateDirectory(Path.GetDirectoryName(MacFile)!); File.WriteAllText(MacFile, JsonSerializer.Serialize(_macs)); } }
+        catch { }
+    }
+
     // Samsung ties its auth token to the CONTROLLER NAME we present. We pin the name that actually
     // paired (alongside the token) so every later connect reuses it; until paired we mint a fresh name
     // each run so a stale/denied TV entry can't silently block us.
@@ -112,7 +130,7 @@ public sealed class AvService
 
     /// <summary>Sends a Wake-on-LAN magic packet to power on a device that's fully off (e.g. a Samsung TV,
     /// which can't be woken by its WebSocket API once asleep). Broadcasts on the LAN to the given MAC.</summary>
-    public static bool WakeOnLan(string? mac)
+    public static bool WakeOnLan(string? mac, string? targetIp = null)
     {
         var m = (mac ?? "").Replace(":", "").Replace("-", "").Replace(".", "");
         if (m.Length != 12) return false;
@@ -122,10 +140,42 @@ public sealed class AvService
             var packet = new byte[102];
             for (int i = 0; i < 6; i++) packet[i] = 0xFF;
             for (int i = 1; i <= 16; i++) Array.Copy(macBytes, 0, packet, i * 6, 6);
-            using var udp = new UdpClient { EnableBroadcast = true };
-            udp.Send(packet, packet.Length, new IPEndPoint(IPAddress.Broadcast, 9));
-            udp.Send(packet, packet.Length, new IPEndPoint(IPAddress.Broadcast, 7));
-            Ip2slClient.Log($"[av] Wake-on-LAN sent to {m}");
+
+            // Destinations: the global broadcast plus the TV's own /24 directed broadcast (e.g. 192.168.20.255)
+            // so the packet lands on the TV's subnet even though this PC is multi-homed.
+            var dests = new List<IPAddress> { IPAddress.Broadcast };
+            if (IPAddress.TryParse(targetIp, out var tip) && tip.AddressFamily == AddressFamily.InterNetwork)
+            {
+                var bb = tip.GetAddressBytes(); bb[3] = 255;
+                dests.Add(new IPAddress(bb));
+            }
+
+            int sent = 0;
+            // Blast from EVERY up IPv4 interface — don't rely on the default route choosing the TV's NIC.
+            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.OperationalStatus != OperationalStatus.Up) continue;
+                foreach (var ua in ni.GetIPProperties().UnicastAddresses)
+                {
+                    if (ua.Address.AddressFamily != AddressFamily.InterNetwork) continue;
+                    try
+                    {
+                        using var udp = new UdpClient(new IPEndPoint(ua.Address, 0)) { EnableBroadcast = true };
+                        foreach (var dst in dests)
+                            foreach (var port in new[] { 9, 7 })
+                            { udp.Send(packet, packet.Length, new IPEndPoint(dst, port)); sent++; }
+                    }
+                    catch { }
+                }
+            }
+            if (sent == 0)   // fallback: default interface only
+            {
+                using var udp = new UdpClient { EnableBroadcast = true };
+                udp.Send(packet, packet.Length, new IPEndPoint(IPAddress.Broadcast, 9));
+                udp.Send(packet, packet.Length, new IPEndPoint(IPAddress.Broadcast, 7));
+                sent = 2;
+            }
+            Ip2slClient.Log($"[av] Wake-on-LAN sent to {m} via {sent} endpoint(s), target={targetIp}");
             return true;
         }
         catch (Exception ex) { Ip2slClient.Log("[av] WoL failed: " + ex.Message); return false; }
@@ -194,6 +244,8 @@ public sealed class AvService
             catch { }
         }
         var id = $"{ip}:{protocol}";
+        if (!string.IsNullOrWhiteSpace(mac)) SaveMac(id, mac!);   // TV was on and told us its MAC — remember it for Wake-on-LAN when it's off
+        else mac = GetMac(id);                                    // TV off / no API — use the MAC we saved earlier
         var d = new AvDevice
         {
             Id = id,
@@ -220,6 +272,13 @@ public sealed class AvService
                 // Keep watching a known device: refresh last-seen, preserve acceptance.
                 existing.LastSeen = DateTime.UtcNow;
                 existing.Name = d.Name.Length > 0 ? d.Name : existing.Name;
+                // Heal pairing state from whichever source has it: discovery finds the TV with no token,
+                // while the manual add / a live pairing carries the saved token+MAC. Never lose them just
+                // because a tokenless discovery arrived later (that caused a TV prompt on every command).
+                if (string.IsNullOrEmpty(existing.ClientKey) && !string.IsNullOrEmpty(d.ClientKey)) existing.ClientKey = d.ClientKey;
+                if (string.IsNullOrEmpty(existing.Mac) && !string.IsNullOrEmpty(d.Mac)) existing.Mac = d.Mac;
+                existing.AvTransportUrl ??= d.AvTransportUrl;
+                existing.RenderingControlUrl ??= d.RenderingControlUrl;
                 return false;
             }
             isNew = true;
@@ -350,9 +409,10 @@ public sealed class AvService
         var lo = (manu + " " + model + " " + name).ToLowerInvariant();
         var protocol = BrandProtocol(lo);
         var needsPairing = protocol is "samsung" or "lg";   // these prompt on the TV to authorise
+        var discId = ip + ":" + protocol;
         var dev2 = new AvDevice
         {
-            Id = ip + ":" + protocol,
+            Id = discId,
             Ip = ip,
             Name = name.Length > 0 ? name : ip,
             Manufacturer = manu,
@@ -360,6 +420,8 @@ public sealed class AvService
             Protocol = protocol,
             Type = ClassifyType(dtype, manu, model),
             NeedsPairing = needsPairing,
+            ClientKey = GetToken(discId),   // stay paired: reuse the saved token so no TV prompt on control
+            Mac = GetMac(discId),           // keep the MAC so Wake-on-LAN works even with the TV off
         };
 
         // Extract AVTransport / RenderingControl control URLs (make absolute).
@@ -602,10 +664,9 @@ public sealed class AvService
         // so send a Wake-on-LAN magic packet to its MAC. "power" (toggle) still uses KEY_POWER below.
         if (action is "power_on" or "wake" or "on")
         {
-            var mac = d.Mac;
-            if (string.IsNullOrEmpty(mac)) mac = ArpLookup(d.Ip);   // fall back to ARP if we didn't capture it
-            return WakeOnLan(mac)
-                ? "Samsung: Wake-on-LAN sent — the TV should power on."
+            var mac = d.Mac ?? GetMac(d.Id) ?? ArpLookup(d.Ip);   // saved MAC, else last-known ARP (only if TV replied recently)
+            return WakeOnLan(mac, d.Ip)
+                ? "Samsung: Wake-on-LAN sent — the TV should power on (needs the TV's network-standby setting ON to work)."
                 : "Samsung: no MAC known for Wake-on-LAN. Re-add the TV while it's on so I can read its MAC.";
         }
 
