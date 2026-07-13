@@ -57,8 +57,13 @@ public sealed class NavicoMfdService : IDisposable
             {
                 try
                 {
-                    using var udp = new UdpClient(new IPEndPoint(IPAddress.Parse(ip), 0)) { Ttl = 2, MulticastLoopback = false };
-                    try { udp.Client.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastInterface, IPAddress.Parse(ip).GetAddressBytes()); } catch { }
+                    // Do NOT bind the socket to the unicast address — Windows rejects binding to a manually
+                    // added link-local (169.254.x) address ("address not valid in its context"). Instead
+                    // leave the socket unbound and select the egress interface by INDEX, which works for
+                    // link-local. The advertised URL still uses this interface's IP.
+                    using var udp = new UdpClient(AddressFamily.InterNetwork) { Ttl = 2, MulticastLoopback = false };
+                    int idx = InterfaceIndexForIp(ip);
+                    if (idx >= 0) { try { udp.Client.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastInterface, IPAddress.HostToNetworkOrder(idx)); } catch { } }
                     SendCal(udp, ip);
                     SendAlarms(udp, ip);
                 }
@@ -114,6 +119,23 @@ public sealed class NavicoMfdService : IDisposable
     {
         var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(payload));
         udp.Send(bytes, bytes.Length, new IPEndPoint(Group, port));
+    }
+
+    // IPv4 interface index that owns the given unicast address (for multicast egress selection).
+    private static int InterfaceIndexForIp(string ip)
+    {
+        try
+        {
+            foreach (var ni in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up) continue;
+                var props = ni.GetIPProperties();
+                if (props.UnicastAddresses.Any(ua => ua.Address.ToString() == ip))
+                    return props.GetIPv4Properties()?.Index ?? -1;
+            }
+        }
+        catch { }
+        return -1;
     }
 
     public void Dispose()
