@@ -662,19 +662,54 @@ setInterval(poll,3000);
     /// <summary>First non-loopback IPv4 address, for showing the LAN URL.</summary>
     public static string LocalIPv4()
     {
+        // Prefer an interface that actually has a default gateway (i.e. is routable) over an isolated
+        // segment. This PC has a dead 192.168.0.x NIC with no gateway; announcing its IP to the MFD /
+        // LAN clients gives them a URL nothing can reach ("Failed to load the page"). Pick a routable one.
+        try
+        {
+            string? fallback = null;
+            foreach (var ni in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up) continue;
+                if (ni.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Loopback) continue;
+                var props = ni.GetIPProperties();
+                bool hasGw = props.GatewayAddresses.Any(g =>
+                    g.Address.AddressFamily == AddressFamily.InterNetwork && !g.Address.Equals(IPAddress.Any));
+                foreach (var ua in props.UnicastAddresses)
+                {
+                    if (ua.Address.AddressFamily != AddressFamily.InterNetwork || IPAddress.IsLoopback(ua.Address)) continue;
+                    if (hasGw) return ua.Address.ToString();   // routable — the address clients can reach
+                    fallback ??= ua.Address.ToString();
+                }
+            }
+            return fallback ?? "127.0.0.1";
+        }
+        catch { }
+        return "127.0.0.1";
+    }
+    /// <summary>All up, non-loopback IPv4 addresses (routable ones first).</summary>
+    public static IReadOnlyList<string> AllLocalIPv4()
+    {
+        var withGw = new List<string>(); var without = new List<string>();
         try
         {
             foreach (var ni in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
             {
                 if (ni.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up) continue;
                 if (ni.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Loopback) continue;
-                foreach (var ua in ni.GetIPProperties().UnicastAddresses)
-                    if (ua.Address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(ua.Address))
-                        return ua.Address.ToString();
+                var props = ni.GetIPProperties();
+                bool hasGw = props.GatewayAddresses.Any(g =>
+                    g.Address.AddressFamily == AddressFamily.InterNetwork && !g.Address.Equals(IPAddress.Any));
+                foreach (var ua in props.UnicastAddresses)
+                {
+                    if (ua.Address.AddressFamily != AddressFamily.InterNetwork || IPAddress.IsLoopback(ua.Address)) continue;
+                    (hasGw ? withGw : without).Add(ua.Address.ToString());
+                }
             }
         }
         catch { }
-        return "127.0.0.1";
+        withGw.AddRange(without);
+        return withGw;
     }
 
     public void Dispose()

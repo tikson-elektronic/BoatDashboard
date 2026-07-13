@@ -31,7 +31,6 @@ public sealed class NavicoMfdService : IDisposable
     private readonly int _httpPort;
     private readonly Func<IReadOnlyList<Alarm>> _alarms;
     private readonly CancellationTokenSource _cts = new();
-    private UdpClient? _udp;
     private int _tick;
 
     public NavicoMfdService(int httpPort, Func<IReadOnlyList<Alarm>> alarms)
@@ -44,26 +43,33 @@ public sealed class NavicoMfdService : IDisposable
 
     private async Task LoopAsync()
     {
-        try
-        {
-            _udp = new UdpClient();
-            _udp.Ttl = 2;                       // reach the local marine LAN segment
-            _udp.MulticastLoopback = false;
-        }
-        catch (Exception ex) { Ip2slClient.Log("[navico] udp init failed: " + ex.Message); return; }
-
-        Ip2slClient.Log("[navico] announcing on 239.2.1.1 (CAL 2053 / alarms 2054)");
+        Ip2slClient.Log("[navico] announcing on 239.2.1.1 (CAL 2053 / alarms 2054), per-interface");
         while (!_cts.IsCancellationRequested)
         {
-            var ip = LocalServer.LocalIPv4();
-            try { SendCal(ip); } catch (Exception ex) { Ip2slClient.Log("[navico] CAL send: " + ex.Message); }
-            try { SendAlarms(ip); } catch (Exception ex) { Ip2slClient.Log("[navico] alarm send: " + ex.Message); }
+            _tick++;
+            // Navico MFDs live on the 169.254.x.x link-local (Zeroconfig) network. If this PC has a
+            // link-local address (i.e. it's on the Navico wire), announce ONLY those URLs — a 192.168.x
+            // URL is on a different L3 subnet the MFD can't route to and only causes "Failed to load".
+            // With no link-local address, fall back to announcing every interface.
+            var ips = LocalServer.AllLocalIPv4();
+            var linkLocal = ips.Where(a => a.StartsWith("169.254.", StringComparison.Ordinal)).ToList();
+            foreach (var ip in linkLocal.Count > 0 ? linkLocal : ips)
+            {
+                try
+                {
+                    using var udp = new UdpClient(new IPEndPoint(IPAddress.Parse(ip), 0)) { Ttl = 2, MulticastLoopback = false };
+                    try { udp.Client.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastInterface, IPAddress.Parse(ip).GetAddressBytes()); } catch { }
+                    SendCal(udp, ip);
+                    SendAlarms(udp, ip);
+                }
+                catch (Exception ex) { Ip2slClient.Log($"[navico] send {ip}: {ex.Message}"); }
+            }
             try { await Task.Delay(TimeSpan.FromSeconds(5), _cts.Token); } catch { break; }
         }
     }
 
     // Client Application Link — advertises the app + the URL of our own web UI.
-    private void SendCal(string ip)
+    private void SendCal(UdpClient udp, string ip)
     {
         var baseUrl = $"http://{ip}:{_httpPort}";
         var cal = new Dictionary<string, object?>
@@ -83,13 +89,12 @@ public sealed class NavicoMfdService : IDisposable
                 MenuText = new[] { new { Language = "en", Name = "Home" } },
             },
         };
-        Send(cal, CalPort);
+        Send(udp, cal, CalPort);
     }
 
     // Alarm announcement — current alarm summary with a watchdog + changing tick.
-    private void SendAlarms(string ip)
+    private void SendAlarms(UdpClient udp, string ip)
     {
-        _tick++;
         var alarms = _alarms();
         var msg = new Dictionary<string, object?>
         {
@@ -102,20 +107,18 @@ public sealed class NavicoMfdService : IDisposable
             ["TickCount"] = _tick,
             ["Alarms"] = alarms.Select(a => new { a.Type, a.Count, New = a.New, NewTickCount = _tick }).ToArray(),
         };
-        Send(msg, AlarmPort);
+        Send(udp, msg, AlarmPort);
     }
 
-    private void Send(object payload, int port)
+    private static void Send(UdpClient udp, object payload, int port)
     {
-        if (_udp is null) return;
         var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(payload));
-        _udp.Send(bytes, bytes.Length, new IPEndPoint(Group, port));
+        udp.Send(bytes, bytes.Length, new IPEndPoint(Group, port));
     }
 
     public void Dispose()
     {
         _cts.Cancel();
-        try { _udp?.Dispose(); } catch { }
         _cts.Dispose();
     }
 }
