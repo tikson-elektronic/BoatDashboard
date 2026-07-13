@@ -1607,6 +1607,8 @@ setInterval(function(){
 if(window.__remote){fetch("/api/cameras").then(function(r){return r.json();}).then(function(d){window.camApply(d);}).catch(function(){});}
 function engToggle(){S.engines.running=!S.engines.running;render();}
 function engRpm(k,v){S.engines[k]=parseInt(v,10);render();}
+// Resolve the real Salon TV device id (first Samsung device), defaulting to the known IP.
+function tvId(){var ds=S.av.devices||[];for(var i=0;i<ds.length;i++){var d=ds[i];if((d.protocol||d.Protocol)==='samsung')return d.id||d.Id;}return '192.168.20.107:samsung';}
 function avSet(k,v){
   if(k==='liftUp'&&S.av.liftUp!==v){
     var curT=_liftCurrent();
@@ -1615,17 +1617,33 @@ function avSet(k,v){
     return;
   }
   S.av[k]=v;render();
+  // Mirror TV toggles to the real set.
+  if(k==='tvSalon')avCtrl(tvId(),v?'power_on':'power');   // ON = Wake-on-LAN; OFF = KEY_POWER
+  else if(k==='tvMute')avCtrl(tvId(),'mute');
+  else if(k==='tvPlay')avCtrl(tvId(),'playpause');
 }
-function avSet2(o){for(var k in o)S.av[k]=o[k];render();}
+var _appActions={NETFLIX:'netflix',YOUTUBE:'youtube',PLEX:'plex',SPOTIFY:'spotify',DISNEY:'disney',PRIME:'prime'};
+var _inputActions={'TV':'tv','HDMI 1':'hdmi1','HDMI 2':'hdmi2','HDMI 3':'hdmi3','HDMI 4':'hdmi4','CHROMECAST':'source'};
+function avSet2(o){
+  for(var k in o)S.av[k]=o[k];render();
+  if(o.tvApp&&_appActions[o.tvApp])avCtrl(tvId(),_appActions[o.tvApp]);
+  else if(o.tvInput&&_inputActions[o.tvInput])avCtrl(tvId(),_inputActions[o.tvInput]);
+}
 var _tvDigits='';var _tvDigitTimer=null;
 function tvDigit(n){
   _tvDigits=(_tvDigits+n).slice(-3);
   clearTimeout(_tvDigitTimer);
   S.av.tvCh=parseInt(_tvDigits,10)||0;render();
+  avCtrl(tvId(),String(n));
   _tvDigitTimer=setTimeout(function(){_tvDigits='';},1500);
 }
-function tvNav(k){/* nav feedback only in prototype */}
-function tvAdj(k,d){if(k==='tvVol')S.av.tvVol=Math.min(100,Math.max(0,S.av.tvVol+d));else S.av.tvCh=Math.min(999,Math.max(1,S.av.tvCh+d));render();}
+var _navActions={'▲':'up','▼':'down','◀':'left','▶':'right','OK':'select','BACK':'back','HOME':'home','PREV':'prev','NEXT':'next'};
+function tvNav(k){if(_navActions[k])avCtrl(tvId(),_navActions[k]);}
+function tvAdj(k,d){
+  if(k==='tvVol'){S.av.tvVol=Math.min(100,Math.max(0,S.av.tvVol+d));avCtrl(tvId(),d>0?'vol_up':'vol_down');}
+  else{S.av.tvCh=Math.min(999,Math.max(1,S.av.tvCh+d));avCtrl(tvId(),d>0?'ch_up':'ch_down');}
+  render();
+}
 function knobDrag(ev){
   ev.preventDefault();
   var startY=ev.clientY, startV=S.av.ampVol, el=ev.currentTarget, moved=false;
