@@ -322,6 +322,10 @@ var S = {
 };
 var LIVE={ac:{v:222,a:9,hz:50},acDetail:{shore1:{v:222,a:9,hz:50},shore2:{v:237,a:6,hz:59.9},generator:{v:0,a:0,hz:0},inverter:{v:0,a:0,hz:0}},batteries:{genset:{v:13.4,a:1},portEngine:{v:13.5,a:0},stbdEngine:{v:13.4,a:0},service:{v:0,a:0}},fuelTransfer:{toTransfer:0,toGo:0},tanks:{waterPort:20,waterStbd:100,fuelAftPort:30,fuelFwdPort:28,fuelAftStbd:41,fuelFwdStbd:18},waterAvg:60,fuelAvg:29,service:{v:'0.0',low:true}};
 var OK='#35d07f',WARN='#ffb648',BAD='#ff4d4f',ACC='#2fc4d1',DIM='#7d939e',TXT='#e8f0f2';
+// Mix a hex colour with white/black in JS — the CSS color-mix() the tank gauges used needs Chrome 111+,
+// which the MFD's embedded browser predates, so the tanks rendered wrong there. pct% of `color`, rest `w`.
+function _rgb(c){c=(c||'#000').replace('#','');if(c.length===3)c=c[0]+c[0]+c[1]+c[1]+c[2]+c[2];return [parseInt(c.substr(0,2),16),parseInt(c.substr(2,2),16),parseInt(c.substr(4,2),16)];}
+function mix(color,pct,w){var a=_rgb(color),b=_rgb(w||'#000'),f=pct/100;return 'rgb('+Math.round(a[0]*f+b[0]*(1-f))+','+Math.round(a[1]*f+b[1]*(1-f))+','+Math.round(a[2]*f+b[2]*(1-f))+')';}
 var NAV=[['home','HOME'],['ac','AC POWER'],['batteries','BATTERIES'],['tanks','TANKS'],['navigation','NAVIGATION'],['nav','NAV LIGHTS'],['engines','ENGINES'],['lighting','LIGHTING'],['av','AV'],['cameras','CAMERAS'],['electronics','ELECTRONICS'],['assistant','ASSISTANT'],['settings','SETTINGS']];
 // The real 8 iTach-controlled lights: [key, label, iTach command code]. Tapping fires the code.
 var ZONES=[['courtesy','INTERIOR COURTESY',0x0009],['pfcabin','PORT FWD CABIN',0x0100],['pfgang','PORT FWD GANGWAY',0x0200],['pmcabin','PORT MID CABIN',0x0300],['galley','GALLEY',0x0500],['salon','SALON',0x0800],['sfcabin','STBD FWD CABIN',0x0900],['sacabin','STBD AFT CABIN',0x0D00]];
@@ -348,17 +352,17 @@ function tank(name,pct,color){
     '<div style="position:absolute;left:0;right:0;bottom:0;top:'+liquidTop+'%;">'
       // liquid column with cylindrical shading
       +'<div style="position:absolute;inset:0;background:linear-gradient(90deg,'
-        +'color-mix(in oklab,'+color+' 55%, #000) 0%,'
+        +mix(color,55,'#000')+' 0%,'
         +color+' 22%,'
-        +'color-mix(in oklab,'+color+' 60%, #fff) 46%,'
+        +mix(color,60,'#fff')+' 46%,'
         +color+' 70%,'
-        +'color-mix(in oklab,'+color+' 50%, #000) 100%);"></div>'
+        +mix(color,50,'#000')+' 100%);"></div>'
       // liquid surface ellipse
       +'<div style="position:absolute;left:0;right:0;top:-'+(CAP/2)+'px;height:'+CAP+'px;border-radius:50%;'
-        +'background:linear-gradient(90deg,color-mix(in oklab,'+color+' 70%, #fff) 0%, color-mix(in oklab,'+color+' 45%, #fff) 50%, color-mix(in oklab,'+color+' 70%, #fff) 100%);'
+        +'background:linear-gradient(90deg,'+mix(color,70,'#fff')+' 0%, '+mix(color,45,'#fff')+' 50%, '+mix(color,70,'#fff')+' 100%);'
         +'box-shadow:inset 0 2px 6px rgba(255,255,255,0.35), inset 0 -2px 5px rgba(0,0,0,0.25);"></div>'
       // bottom curve of liquid
-      +'<div style="position:absolute;left:0;right:0;bottom:-'+(CAP/2)+'px;height:'+CAP+'px;border-radius:50%;background:color-mix(in oklab,'+color+' 60%, #000);"></div>'
+      +'<div style="position:absolute;left:0;right:0;bottom:-'+(CAP/2)+'px;height:'+CAP+'px;border-radius:50%;background:'+mix(color,60,'#000')+';"></div>'
     +'</div>';
   // graduation ticks at 25/50/75
   var ticks=[25,50,75].map(function(t){
@@ -430,7 +434,7 @@ home: function(){
       return '<div style="flex:1;display:flex;flex-direction:column;height:100%;gap:4px;min-width:0;">'
         +'<div class="cond" style="font-size:15px;font-weight:600;color:'+pc+';text-align:center;line-height:1;">'+m[1]+'<span style="font-size:10px;color:#7d939e;">%</span></div>'
         +'<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;border-radius:5px;background:#0d151b;box-shadow:inset 0 2px 5px rgba(0,0,0,0.55);overflow:hidden;padding:2px;">'
-          +'<div style="height:'+m[1]+'%;min-height:4px;border-radius:3px;background:linear-gradient(90deg,color-mix(in oklab,'+m[2]+' 55%, #000),'+m[2]+' 45%,color-mix(in oklab,'+m[2]+' 60%, #fff) 60%,'+m[2]+');box-shadow:0 0 8px '+m[2]+'44;"></div>'
+          +'<div style="height:'+m[1]+'%;min-height:4px;border-radius:3px;background:linear-gradient(90deg,'+mix(m[2],55,'#000')+','+m[2]+' 45%,'+mix(m[2],60,'#fff')+' 60%,'+m[2]+');box-shadow:0 0 8px '+m[2]+'44;"></div>'
         +'</div>'
         +'<div style="font-size:8px;font-weight:700;letter-spacing:0.4px;color:#7d939e;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+m[0]+'</div>'
       +'</div>';}).join('')
@@ -658,13 +662,13 @@ batteries: function(){
   +(S.alarm?'<div style="margin-top:18px;border-radius:12px;border:1px solid rgba(255,77,79,0.5);background:rgba(255,77,79,0.08);padding:16px 20px;display:flex;align-items:center;gap:14px;"><div style="width:10px;height:10px;border-radius:50%;background:#ff4d4f;animation:pulseDot 1.2s infinite;flex-shrink:0;"></div><div style="font-size:14px;color:#ffb3b4;"><b>Low battery level.</b> Service bank reads 0.0 V — check the main service breaker and shunt connection. Loads on the domestic bus are running from shore power.</div></div>':'');
 },
 tanks: function(){
-  return '<h2 class="cond">TANKS</h2><div style="display:flex;gap:28px;align-items:stretch;flex-wrap:wrap;">'
-  +'<div class="card" style="padding:24px;flex:1;min-width:300px;"><div style="font-size:12px;font-weight:700;letter-spacing:2px;color:#7d939e;margin-bottom:18px;">FRESH WATER</div>'
-  +'<div style="display:flex;gap:24px;">'+tank('PORT',LIVE.tanks.waterPort,ACC)+tank('STARBOARD',LIVE.tanks.waterStbd,ACC)+'</div></div>'
-  +'<div class="card" style="padding:24px;flex:2;min-width:420px;display:flex;flex-direction:column;">'
-  +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;"><div style="font-size:12px;font-weight:700;letter-spacing:2px;color:#7d939e;">DIESEL</div>'
-  +'<div onclick="tgl(\'transfer\')" style="height:44px;padding:0 20px;display:flex;align-items:center;border-radius:8px;border:1px solid '+(S.transfer?WARN:ACC)+';background:'+(S.transfer?'rgba(255,182,72,0.15)':'transparent')+';color:'+(S.transfer?WARN:ACC)+';font-size:13px;font-weight:700;letter-spacing:1.5px;cursor:pointer;">'+(S.transfer?'TRANSFERRING · TAP TO STOP':'START FUEL TRANSFER')+'</div></div>'
-  +'<div style="display:flex;gap:24px;flex:1;">'+tank('AFT PORT',LIVE.tanks.fuelAftPort,WARN)+tank('FWD PORT',LIVE.tanks.fuelFwdPort,WARN)+tank('AFT STBD',LIVE.tanks.fuelAftStbd,WARN)+tank('FWD STBD',LIVE.tanks.fuelFwdStbd,WARN)+'</div></div></div>';
+  return '<h2 class="cond">TANKS</h2><div style="display:flex;gap:20px;align-items:stretch;flex-wrap:wrap;max-width:100%;">'
+  +'<div class="card" style="padding:20px;flex:1;min-width:230px;"><div style="font-size:12px;font-weight:700;letter-spacing:2px;color:#7d939e;margin-bottom:16px;">FRESH WATER</div>'
+  +'<div style="display:flex;gap:14px;">'+tank('PORT',LIVE.tanks.waterPort,ACC)+tank('STARBOARD',LIVE.tanks.waterStbd,ACC)+'</div></div>'
+  +'<div class="card" style="padding:20px;flex:2;min-width:340px;display:flex;flex-direction:column;">'
+  +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:16px;flex-wrap:wrap;"><div style="font-size:12px;font-weight:700;letter-spacing:2px;color:#7d939e;">DIESEL</div>'
+  +'<div onclick="tgl(\'transfer\')" style="height:40px;padding:0 14px;display:flex;align-items:center;border-radius:8px;border:1px solid '+(S.transfer?WARN:ACC)+';background:'+(S.transfer?'rgba(255,182,72,0.15)':'transparent')+';color:'+(S.transfer?WARN:ACC)+';font-size:12px;font-weight:700;letter-spacing:1px;cursor:pointer;white-space:nowrap;">'+(S.transfer?'TRANSFERRING · STOP':'START FUEL TRANSFER')+'</div></div>'
+  +'<div style="display:flex;gap:10px;flex:1;">'+tank('AFT PORT',LIVE.tanks.fuelAftPort,WARN)+tank('FWD PORT',LIVE.tanks.fuelFwdPort,WARN)+tank('AFT STBD',LIVE.tanks.fuelAftStbd,WARN)+tank('FWD STBD',LIVE.tanks.fuelFwdStbd,WARN)+'</div></div></div>';
 },
 navigation: function(){
   var d=S.navd;
@@ -1416,7 +1420,7 @@ function render(){
   var _ov=document.getElementById('navCarousel');
   if(S.navOpen){
     if(!_ov){_ov=document.createElement('div');_ov.id='navCarousel';document.body.appendChild(_ov);}
-    _ov.innerHTML=buildCarousel();
+    _ov.innerHTML=window.__remote?buildMfdMenu():buildCarousel();   // touch clients (MFD/iPad) get the simple grid
   } else if(_ov){_ov.remove();}
   _applyShadeAnims();
   _applyLiftAnim();
@@ -1524,6 +1528,26 @@ function hubDrag(ev){
 function navPickTop(){
   var step=360/NAV.length;var idx=((Math.round(-_navRot/step))%NAV.length+NAV.length)%NAV.length;
   navPick(NAV[idx][0]);
+}
+// Simple, reliable tap-grid menu for touch clients (MFD chartplotter, iPad). The radial ring depends on
+// drag/rotate/pointer gestures that the MFD's browser doesn't handle, so touch devices get plain buttons.
+function buildMfdMenu(){
+  var cur=S.screen;
+  var items=NAV.map(function(n){
+    var act=n[0]===cur;
+    return '<div onclick="navPick(&quot;'+n[0]+'&quot;)" style="height:92px;display:flex;align-items:center;justify-content:center;text-align:center;padding:0 8px;border-radius:14px;cursor:pointer;user-select:none;'
+      +'background:'+(act?'linear-gradient(180deg,#1d3a41,#16333a)':'linear-gradient(180deg,#1a2530,#121b23)')+';'
+      +'border:1px solid '+(act?'rgba(47,196,209,0.6)':'rgba(255,255,255,0.08)')+';'
+      +'box-shadow:'+(act?'0 0 14px rgba(47,196,209,0.25)':'0 3px 8px rgba(0,0,0,0.4)')+';'
+      +'color:'+(act?'#2fc4d1':'#d3e0e6')+';font-size:17px;font-weight:700;letter-spacing:1px;font-family:Barlow Condensed,sans-serif;">'+n[1]+'</div>';
+  }).join('');
+  return '<div onclick="navToggle()" style="position:fixed;inset:0;z-index:200;background:rgba(6,10,14,0.92);display:flex;flex-direction:column;padding:26px;box-sizing:border-box;">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-shrink:0;">'
+      +'<div style="font-size:24px;font-weight:700;letter-spacing:4px;color:#2fc4d1;font-family:Barlow Condensed,sans-serif;">MENU</div>'
+      +'<div onclick="event.stopPropagation();navToggle()" style="width:56px;height:56px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:24px;color:#d3e0e6;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.14);cursor:pointer;">✕</div>'
+    +'</div>'
+    +'<div onclick="event.stopPropagation()" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;overflow:auto;align-content:start;">'+items+'</div>'
+  +'</div>';
 }
 function buildCarousel(){
   var N=NAV.length, step=360/N, R=168, C=230;
