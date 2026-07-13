@@ -328,6 +328,17 @@ var OK='#35d07f',WARN='#ffb648',BAD='#ff4d4f',ACC='#2fc4d1',DIM='#7d939e',TXT='#
 // which the MFD's embedded browser predates, so the tanks rendered wrong there. pct% of `color`, rest `w`.
 function _rgb(c){c=(c||'#000').replace('#','');if(c.length===3)c=c[0]+c[0]+c[1]+c[1]+c[2]+c[2];return [parseInt(c.substr(0,2),16),parseInt(c.substr(2,2),16),parseInt(c.substr(4,2),16)];}
 function mix(color,pct,w){var a=_rgb(color),b=_rgb(w||'#000'),f=pct/100;return 'rgb('+Math.round(a[0]*f+b[0]*(1-f))+','+Math.round(a[1]*f+b[1]*(1-f))+','+Math.round(a[2]*f+b[2]*(1-f))+')';}
+// Honest placeholder for screens whose data has no live source (e.g. no NMEA 2000 gateway).
+// Shown instead of fabricated/demo numbers so nothing on screen pretends to be live.
+function honestNoData(title,head,body){
+  return '<h2 class="cond" style="margin-bottom:22px;">'+title+'</h2>'
+    +'<div class="card" style="max-width:660px;padding:34px 32px;display:flex;flex-direction:column;gap:14px;align-items:flex-start;">'
+    +'<div style="display:flex;align-items:center;gap:12px;"><div style="width:10px;height:10px;border-radius:50%;background:'+WARN+';box-shadow:0 0 10px '+WARN+';flex-shrink:0;"></div>'
+    +'<div style="font-size:15px;font-weight:700;letter-spacing:1.5px;color:'+WARN+';">'+head+'</div></div>'
+    +'<div style="font-size:13px;color:#9fb4be;line-height:1.6;">'+body+'</div>'
+    +'<div style="font-size:12px;color:#5d7280;">Set the gateway address in Settings → System once one is installed.</div>'
+    +'</div>';
+}
 var NAV=[['home','HOME'],['ac','AC POWER'],['batteries','BATTERIES'],['tanks','TANKS'],['navigation','NAVIGATION'],['nav','NAV LIGHTS'],['engines','ENGINES'],['lighting','LIGHTING'],['av','AV'],['cameras','CAMERAS'],['electronics','ELECTRONICS'],['assistant','ASSISTANT'],['settings','SETTINGS']];
 // The real 8 iTach-controlled lights: [key, label, iTach command code]. Tapping fires the code.
 var ZONES=[['courtesy','INTERIOR COURTESY',0x0009],['pfcabin','PORT FWD CABIN',0x0100],['pfgang','PORT FWD GANGWAY',0x0200],['pmcabin','PORT MID CABIN',0x0300],['galley','GALLEY',0x0500],['salon','SALON',0x0800],['sfcabin','STBD FWD CABIN',0x0900],['sacabin','STBD AFT CABIN',0x0D00]];
@@ -676,6 +687,9 @@ navigation: function(){
   var d=S.navd;
   // Real navigation data from the NMEA 2000 gateway (LIVE.nav) overrides demo values when present.
   var LN=LIVE.nav;
+  // No gateway → no heading/speed/depth/wind/position exists. Show that honestly, not invented numbers.
+  if(!LN) return honestNoData('NAVIGATION','NMEA 2000 GATEWAY NOT CONNECTED',
+    'Heading, SOG, COG, depth, wind and GPS position all come from the vessel’s NMEA 2000 network through a gateway (Actisense / YachtDevices). No gateway is configured, so there is no live navigation data to display.');
   if(LN){
     if(LN.heading!=null)d.hdg=Math.round(LN.heading);
     if(LN.cog!=null)d.cog=Math.round(LN.cog);
@@ -792,6 +806,9 @@ nav: function(){
 engines: function(){
   // Real engine data from the NMEA 2000 gateway (LIVE.engines) overrides the demo state when present.
   var LE=LIVE.engines;
+  // No gateway → no RPM/temp/oil/hours source (the iTach doesn't carry engine data). Be honest, don't fake it.
+  if(!LE) return honestNoData('ENGINES','NMEA 2000 GATEWAY NOT CONNECTED',
+    'Engine RPM, coolant temperature, oil pressure, running hours and fuel rate come from the NMEA 2000 network through a gateway. No gateway is configured, so there is no live engine data to display.');
   if(LE&&LE.running){
     S.engines.running=true;
     if(LE.port&&LE.port.rpm!=null)S.engines.rpmP=Math.round(LE.port.rpm);
@@ -1819,18 +1836,8 @@ function dragLight(ev,key){
   document.addEventListener('pointerup', function(e){ if(e.pointerType === 'mouse') return; fire(e); }, {passive:false, capture:true});
 })();
 clock();setInterval(clock,15000);
-setInterval(function(){
-  if(S.screen!=='navigation')return;
-  var d=S.navd;
-  d.hdg=(d.hdg+ (Math.random()*4-2) +360)%360;
-  d.cog=(d.hdg-3+ (Math.random()*2-1) +360)%360;
-  d.sog=Math.max(0,d.sog+(Math.random()*0.6-0.3));
-  d.depth=Math.max(2,d.depth+(Math.random()*0.8-0.4));
-  d.aws=Math.max(0,d.aws+(Math.random()*2-1));
-  d.xte=Math.max(-0.2,Math.min(0.2,d.xte+(Math.random()*0.02-0.01)));
-  d.dtw=Math.max(0,d.dtw-0.005);
-  if(!S.navOpen)render();
-},2000);
+// (removed) navigation demo random-walk. The Navigation page shows NO DATA until a real
+// NMEA 2000 gateway feeds LIVE.nav — nothing fabricates heading/speed/depth motion any more.
 render();
 </script>
 
