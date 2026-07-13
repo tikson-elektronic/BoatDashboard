@@ -38,18 +38,57 @@ assistant are all consumers of that view model.
 
 ## 2. Source files
 
-| File | Lines | Role |
-|---|---|---|
-| `BoatDashboard.csproj` | 19 | .NET 9 `net9.0-windows`, WPF, `Anthropic` 12.9.0 + `MQTTnet` 4.3.7. `WinExe`, custom `app.manifest`. |
-| `App.xaml(.cs)` | — | WPF application bootstrap; merges `Theme.xaml`, starts `MainWindow`. |
-| `Theme.xaml` | — | Dark theme: color palette + card/button/pill styles. |
-| `Ip2slClient.cs` | 153 | **The hardware layer.** TCP read loop, frame parser, serialized writes, heartbeat, auto-reconnect, debug log. |
-| `ViewModels.cs` | 206 | MVVM view models (`TankVm`/`BatteryVm`/`AcVm`/`LightVm`/`ChatMessage`) + `DashboardViewModel` with `Refresh`, `StatusJson`, `MqttPoints`. |
-| `MainWindow.xaml(.cs)` | 169 | Dashboard layout + wiring: 800 ms poll timer, light clicks, settings dialog, MQTT lifecycle, chat. |
-| `SettingsWindow.xaml(.cs)` | — | Modal dialog: Claude API key + MQTT broker config. |
-| `Settings.cs` | 49 | `AppSettings`/`MqttSettings` models + `SettingsStore` JSON load/save under `%AppData%`. |
-| `MqttPublisher.cs` | 47 | MQTTnet wrapper: connect/disconnect, retained `PublishAsync`. |
-| `ClaudeAssistant.cs` | 147 | Anthropic SDK manual tool-use loop with `get_status` + `control_lights` tools. |
+> The project began as the single-window `MainWindow` dashboard (still in the repo).
+> The current startup window is **`ShellWindow`**, which hosts the "Lagoon 630 Vessel
+> Monitor" HTML5 UI in a WebView2 and wires in the newer subsystems below.
+
+**Core (original hardware + UI):**
+
+| File | Role |
+|---|---|
+| `BoatDashboard.csproj` | .NET 9 `net9.0-windows`, WPF. `WinExe`, custom `app.manifest`. |
+| `App.xaml(.cs)` | WPF bootstrap; merges `Theme.xaml`, global exception self-heal, starts `ShellWindow`. |
+| `Theme.xaml` | Dark theme: palette + card/button/pill styles. |
+| `Ip2slClient.cs` | **The hardware layer.** TCP read loop to the iTach, frame parser, serialized writes, heartbeat, auto-reconnect, `debug.log`. |
+| `ViewModels.cs` | MVVM view models (`TankVm`/`BatteryVm`/`AcVm`/`LightVm`/`ChatMessage`) + `DashboardViewModel` (`Refresh`, `StatusJson`, `MqttPoints`). |
+| `MainWindow.xaml(.cs)` | **Legacy** native dashboard (poll timer, light clicks, chat). No longer the startup window. |
+| `SettingsWindow.xaml(.cs)` / `Settings.cs` | Settings dialog + `AppSettings` model & JSON persistence under `%AppData%`. |
+
+**Shell & web delivery:**
+
+| File | Role |
+|---|---|
+| `ShellWindow.xaml(.cs)` | **Startup window.** Hosts `WebUI/app.html` in WebView2, feeds it a live `LIVE` telemetry object, kiosk mode, and wires up every subsystem below (message bridge → `HandleWebCommand`). |
+| `WebUI/app.html` | The "Lagoon 630 Vessel Monitor" HTML5 UI — served to the WebView2, the iPad, and the MFDs. |
+| `LocalServer.cs` | Dependency-free **LAN HTTP server** (`TcpListener`, no urlacl) on **:8080**. Serves the UI + `/api/*` (telemetry, cmd, cameras, AV) with LAN access control + loopback Basic Auth. |
+
+**AI & voice:**
+
+| File | Role |
+|---|---|
+| `ClaudeAssistant.cs` | Anthropic SDK tool-use loop (`get_status`, `control_lights`, …) on `claude-opus-4-8`. |
+| `MemoryStore.cs` | Persistent AI memory (prefs, remembered facts) → `C:\voms\memory.json`. |
+| `VoiceService.cs` | Fully offline voice: Windows speech recognition (input) + TTS (spoken replies). |
+| `VisionService.cs` | YOLOv8 (ONNX) "visual sensors": per-camera object detection → MQTT + proactive assistant alerts. |
+
+**Vessel I/O & integrations:**
+
+| File | Role |
+|---|---|
+| `NavicoMfdService.cs` | **Simrad/B&G/Lowrance MFD integration** — UDP-multicast HTML5 app advertisement + native alarms. See [`MFD_INTEGRATION.md`](MFD_INTEGRATION.md). |
+| `NmeaService.cs` | NMEA 2000 nav + engine data via a CAN gateway (YDWG-02/W2K-1…); graceful no-op with no gateway. |
+| `AvService.cs` | AV device discovery/control: Samsung TV (WebSocket), ESPHome, amplifier, salon TV lift, Wake-on-LAN. |
+| `AutomationService.cs` | Rules engine — structured trigger→action rules that run without re-invoking Claude. |
+| `PcStats.cs` | Onboard-PC host telemetry: CPU load (`GetSystemTimes`) + CPU temp (ACPI thermal zone via WMI). |
+
+**Cloud & messaging:**
+
+| File | Role |
+|---|---|
+| `MqttPublisher.cs` | MQTTnet wrapper: connect/disconnect, retained `PublishAsync` (local broker / Home Assistant). |
+| `MqttAgent.cs` | Onboard VOMS cloud agent: after pairing, publishes the full sensor set + heartbeat/LWT + capability manifest to the cloud broker. |
+| `PairingService.cs` | Cloud pairing claim → persists broker credentials to `C:\voms\mqtt.env`. |
+| `CloudflareTunnelService.cs` | Cloudflare "quick tunnel" exposing `localhost:8080` over HTTPS — reach the boat from anywhere, no port-forwarding. |
 
 ---
 

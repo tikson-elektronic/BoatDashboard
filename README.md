@@ -40,6 +40,53 @@ below) remains in the repo but is no longer the startup window.
 
 ---
 
+## 🛰 On the boat's chartplotters (Simrad / B&G / Lowrance MFDs)
+
+The dashboard advertises itself to the vessel's **MFDs** using the **Navico HTML5
+Integration Protocol** (UDP multicast on `239.2.1.1`, ports 2053/2054). An app tile
+appears on the MFD home page; tapping it opens the **full dashboard** inside the MFD's
+built-in browser, and boat conditions (service-battery fault, low tanks) raise
+**native MFD alarms** with a working Acknowledge.
+
+The MFDs live on the `169.254.x.x` link-local backbone; the announcer selects that
+interface by index and cache-busts every URL so the old MFD browser reloads fresh HTML.
+
+📖 **Full write-up:** [`docs/MFD_INTEGRATION.md`](docs/MFD_INTEGRATION.md) — the complete
+"how it talks to the MFD" reference.
+
+---
+
+## ✨ What else it does now
+
+Beyond the core iTach dashboard, the app has grown these subsystems (all documented in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §2):
+
+| Area | Capability |
+|---|---|
+| **LAN web server** | `LocalServer` serves the UI + `/api/*` on **:8080** to any device on the boat (iPad, phone, MFD) — no app install. |
+| **MFD integration** | `NavicoMfdService` — app tile + native alarms on Simrad/B&G/Lowrance. |
+| **NMEA 2000** | `NmeaService` — real nav + engine data via a CAN gateway. |
+| **AV control** | `AvService` — Samsung TV, amplifier, salon TV lift, ESPHome, Wake-on-LAN. |
+| **Automation** | `AutomationService` — trigger→action rules that run without calling Claude. |
+| **Voice** | `VoiceService` — fully offline speech-in / TTS-out. |
+| **Vision** | `VisionService` — YOLOv8 camera object-detection "visual sensors". |
+| **Cloud** | `MqttAgent` + `PairingService` publish the full sensor set to the VOMS cloud broker; `CloudflareTunnelService` exposes the dashboard over HTTPS. |
+| **AI memory** | `MemoryStore` — the assistant remembers prefs/facts across restarts. |
+| **PC health** | `PcStats` — onboard-PC CPU load + temperature on the Settings page. |
+
+---
+
+## 📚 Documentation index
+
+| Doc | Contents |
+|---|---|
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Every source file, threading model, end-to-end data flow, build/release. |
+| [`docs/PROTOCOL.md`](docs/PROTOCOL.md) | iTach wire protocol — frames, command codes, capture method. |
+| [`docs/MFD_INTEGRATION.md`](docs/MFD_INTEGRATION.md) | How the dashboard talks to the Simrad/Navico MFDs. |
+| [`docs/VESSEL_MONITOR_UI.md`](docs/VESSEL_MONITOR_UI.md) | The Lagoon 630 Vessel Monitor HTML5 UI. |
+
+---
+
 ## Screenshot / layout
 
 ```
