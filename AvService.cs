@@ -751,7 +751,17 @@ public sealed class AvService
 
         bool playing = transport == "PLAYING";
         if (string.IsNullOrEmpty(title) && !string.IsNullOrEmpty(stream)) title = stream;
-        return JsonSerializer.Serialize(new { source, playing, title, artist });
+
+        // Live volume + mute (RenderingControl) so the dashboard can match the amp's real-time state,
+        // not just the value it last set. -1 = couldn't read (UI keeps its current value).
+        int volume = -1; bool mute = false;
+        var rctrl = $"http://{ip}:1400/MediaRenderer/RenderingControl/Control";
+        var vr = await SoapRawAsync(rctrl, "RenderingControl", "GetVolume", "<InstanceID>0</InstanceID><Channel>Master</Channel>");
+        if (vr is not null && int.TryParse(Rx1(vr, "<CurrentVolume>(.*?)</CurrentVolume>"), out var vv)) volume = vv;
+        var mr = await SoapRawAsync(rctrl, "RenderingControl", "GetMute", "<InstanceID>0</InstanceID><Channel>Master</Channel>");
+        if (mr is not null) mute = Rx1(mr, "<CurrentMute>(.*?)</CurrentMute>") == "1";
+
+        return JsonSerializer.Serialize(new { source, playing, title, artist, volume, mute });
     }
 
     // ---- Generic UPnP MediaRenderer (SOAP) ----

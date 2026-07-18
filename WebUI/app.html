@@ -291,7 +291,7 @@
         <div style="display:flex;align-items:baseline;gap:12px;">
           <div class="cond" style="font-weight:600;font-size:24px;letter-spacing:10px;background:linear-gradient(180deg,#f4f9fb,#9fb4be);-webkit-background-clip:text;background-clip:text;color:transparent;">LAGOON</div>
         </div>
-        <div class="cond" style="font-weight:500;font-size:13px;letter-spacing:4px;color:#54687a;">630 MOTOR YACHT · VESSEL MONITOR · BUILD 1819</div>
+        <div class="cond" style="font-weight:500;font-size:13px;letter-spacing:4px;color:#54687a;">630 MOTOR YACHT · VESSEL MONITOR · BUILD 1820</div>
       </div>
     </div>
     <div style="flex:1;"></div>
@@ -387,7 +387,12 @@ setTimeout(function(){if(typeof spotStatus==='function')spotStatus();},1600);
 function pollSonosNow(){if(typeof S==='undefined'||S.screen!=='av')return;
   var focused=document.activeElement&&(document.activeElement.tagName==='INPUT'||document.activeElement.tagName==='SELECT');
   SONOS_ZONES.forEach(function(z,i){var ip=z[1].split(':')[0];
-    fetch('/api/sonos/now?ip='+ip,{cache:'no-store'}).then(function(r){return r.json();}).then(function(n){var st=_az(i);st.live=n;if(!focused&&typeof render==='function')render();}).catch(function(){});});}
+    fetch('/api/sonos/now?ip='+ip,{cache:'no-store'}).then(function(r){return r.json();}).then(function(n){var st=_az(i);st.live=n;
+      // Reflect the amp's REAL volume/mute so the UI matches reality — but don't clobber a change the user
+      // just made locally (give the in-flight command ~3s to settle before trusting the readback).
+      if(typeof n.volume==='number'&&n.volume>=0&&(Date.now()-(st.volT||0))>3000){st.vol=n.volume;}
+      if(typeof n.mute==='boolean'&&(Date.now()-(st.volT||0))>3000){st.mute=n.mute;}
+      if(!focused&&typeof render==='function')render();}).catch(function(){});});}
 setInterval(pollSonosNow,6000);setTimeout(pollSonosNow,1500);
 // Shade Shelly status (online / moving / pos / alarm) for the shade cards + offline alarm.
 var _shadeStatus={};
@@ -2101,14 +2106,14 @@ function setTvAudioOut(mode){S.av.tvAudioOut=mode;var salon=SONOS_ZONES[0][1];
   if(mode==='optical'){avCtrl(salon,'source','line');}   // TV optical lands on Salon amp line-in
   else{avCtrl(salon,'pause','');}                          // leave the TV on its own speakers (amp stopped)
   render();}
-function tvToAmp(md){avCtrl('192.168.20.119:sonos','source','tv');if(md)avCtrl('192.168.20.19:sonos','join','192.168.20.119');}
+function tvToAmp(md){avCtrl('192.168.20.119:sonos','source','line');if(md)avCtrl('192.168.20.19:sonos','join','192.168.20.119');}
 function ampZoneSet(i){S.av.ampZone=i;render();}   // just re-targets; no command sent on switch
 // Link/unlink Sonos zones: join the other zones to the selected one (coordinator), or split all apart.
 function ampLinkAll(){var coordIp=SONOS_ZONES[0][1].split(':')[0];SONOS_ZONES.forEach(function(z,i){if(i!==0)avCtrl(z[1],'join',coordIp);});render();}
 // Per-zone independent amp control — each acts only on its own Sonos (SONOS_ZONES[i]).
 function _az(i){if(!S.av.z)S.av.z=[{vol:20,playing:false,mute:false},{vol:20,playing:false,mute:false},{vol:20,playing:false,mute:false}];return S.av.z[i];}
-function ampVolZ(i,d){var st=_az(i);st.vol=Math.max(0,Math.min(100,st.vol+d));st.mute=false;avCtrl(SONOS_ZONES[i][1],'volume',String(st.vol));render();}
-function ampMuteZ(i){var st=_az(i);st.mute=!st.mute;avCtrl(SONOS_ZONES[i][1],st.mute?'mute':'unmute');render();}
+function ampVolZ(i,d){var st=_az(i);st.vol=Math.max(0,Math.min(100,st.vol+d));st.mute=false;st.volT=Date.now();avCtrl(SONOS_ZONES[i][1],'volume',String(st.vol));render();}
+function ampMuteZ(i){var st=_az(i);st.mute=!st.mute;st.volT=Date.now();avCtrl(SONOS_ZONES[i][1],st.mute?'mute':'unmute');render();}
 // Radio streams can't be paused (live), so "pause" = stop; "play" re-starts the last station (or resumes a source).
 function ampPlayZ(i){var st=_az(i);if(st.playing){st.playing=false;avCtrl(SONOS_ZONES[i][1],'stop','');}else{st.playing=true;if(st.lastUrl)avCtrl(SONOS_ZONES[i][1],'playstream',st.lastUrl);else avCtrl(SONOS_ZONES[i][1],'play','');}render();}
 function playStationZ(i,u){var st=_az(i);st.playing=true;st.mute=false;st.lastUrl=u;avCtrl(SONOS_ZONES[i][1],'playstream',u);render();}
@@ -2116,7 +2121,9 @@ function playFavZ(i,f){var st=_az(i);st.playing=true;avCtrl(SONOS_ZONES[i][1],'p
 function ampStopZ(i){var st=_az(i);st.playing=false;avCtrl(SONOS_ZONES[i][1],'pause','');render();}
 // Per-amp source. TV/LINE are Sonos physical inputs; SPOTIFY reveals the Spotify panel; RADIO shows stations.
 function ampSrcZ(i,v){var st=_az(i);st.src=v;
-  if(v==='TV'){st.playing=true;avCtrl(SONOS_ZONES[i][1],'source','tv');}
+  // On this boat the Salon TV audio arrives on the amp's LINE (RCA) input (optical->RCA), NOT HDMI-ARC —
+  // so the "TV" source plays the line-in, same as LINE. (htastream 'tv' would be silent here.)
+  if(v==='TV'){st.playing=true;avCtrl(SONOS_ZONES[i][1],'source','line');}
   else if(v==='LINE'){st.playing=true;avCtrl(SONOS_ZONES[i][1],'source','line');}
   else if(v==='SPOTIFY'){spotStatus();spotNow();}
   render();}
@@ -2171,7 +2178,7 @@ function avVol(d){S.av.ampVol=Math.min(100,Math.max(0,S.av.ampVol+d));render();}
 // A scene is a named set of desired states applied by reusing the existing control functions (so lights use
 // their live state, amps/shades/TV/lift use their real commands). Automations (the C# engine) fire a scene
 // by id in this WebView. Scenes persist to /api/scenes; automations to /api/automations (AutomationService).
-function ampSetVolZ(i,vol){var st=_az(i);vol=Math.max(0,Math.min(100,parseInt(vol,10)||0));st.vol=vol;st.mute=false;avCtrl(SONOS_ZONES[i][1],'volume',String(vol));}
+function ampSetVolZ(i,vol){var st=_az(i);vol=Math.max(0,Math.min(100,parseInt(vol,10)||0));st.vol=vol;st.mute=false;st.volT=Date.now();avCtrl(SONOS_ZONES[i][1],'volume',String(vol));}
 function _sceneBlank(){return {id:'sc'+Date.now(),name:'',amps:[{src:'',vol:''},{src:'',vol:''},{src:'',vol:''}],tv:{app:'',power:''},shades:{port:'',stbd:'',front:'',aft:''},lights:{all:'',nav:'',anchor:''},lift:''};}
 function loadScenes(cb){fetch('/api/scenes',{cache:'no-store'}).then(function(r){return r.json();}).then(function(a){S.scenes=Array.isArray(a)?a:[];if(cb)cb();if(typeof render==='function')render();}).catch(function(){if(cb)cb();});}
 function saveScenes(){fetch('/api/scenes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(S.scenes||[])}).catch(function(){});}
