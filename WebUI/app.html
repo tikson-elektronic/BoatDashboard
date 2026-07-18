@@ -291,7 +291,7 @@
         <div style="display:flex;align-items:baseline;gap:12px;">
           <div class="cond" style="font-weight:600;font-size:24px;letter-spacing:10px;background:linear-gradient(180deg,#f4f9fb,#9fb4be);-webkit-background-clip:text;background-clip:text;color:transparent;">LAGOON</div>
         </div>
-        <div class="cond" style="font-weight:500;font-size:13px;letter-spacing:4px;color:#54687a;">630 MOTOR YACHT · VESSEL MONITOR · BUILD 1822</div>
+        <div class="cond" style="font-weight:500;font-size:13px;letter-spacing:4px;color:#54687a;">630 MOTOR YACHT · VESSEL MONITOR · BUILD 1823</div>
       </div>
     </div>
     <div style="flex:1;"></div>
@@ -1420,6 +1420,8 @@ av: function(){
   if(!S.av.z)S.av.z=[{vol:20,playing:false,mute:false},{vol:20,playing:false,mute:false},{vol:20,playing:false,mute:false}];
   var amp=SONOS_ZONES.map(function(z,i){
     var st=S.av.z[i];
+    var mem=_groupMembers(i);                                   // zones following THIS zone (it's the source)
+    var isFollower=!!(st.live&&st.live.source==='GROUPED');     // this zone is following another source
     var pill='height:36px;padding:0 15px;display:flex;align-items:center;justify-content:center;border-radius:8px;font-size:11px;font-weight:700;letter-spacing:0.5px;cursor:pointer;';
     var vbtn='width:46px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:8px;background:linear-gradient(180deg,#26343f,#1a242d);border:1px solid rgba(255,255,255,0.08);color:#e8f0f2;font-size:24px;font-weight:700;cursor:pointer;';
     return '<div class="card" style="padding:18px 20px;'+(st.playing?'border-color:rgba(47,196,209,0.35);':'')+'">'
@@ -1435,7 +1437,6 @@ av: function(){
         +'<div style="display:flex;gap:8px;">'
           +'<div onclick="ampPlayZ('+i+')" style="'+pill+'background:'+(st.playing?'linear-gradient(180deg,#1d3a41,#16333a)':'linear-gradient(180deg,#26343f,#1a242d)')+';border:1px solid '+(st.playing?'rgba(47,196,209,0.5)':'rgba(255,255,255,0.08)')+';color:'+(st.playing?'#2fc4d1':'#9fb4be')+';">'+(st.playing?'❚❚ PAUSE':'▶ PLAY')+'</div>'
           +'<div onclick="ampMuteZ('+i+')" style="'+pill+'background:'+(st.mute?'linear-gradient(180deg,#3a1d1d,#331616)':'linear-gradient(180deg,#26343f,#1a242d)')+';border:1px solid '+(st.mute?'rgba(255,77,79,0.5)':'rgba(255,255,255,0.08)')+';color:'+(st.mute?'#ff8a8c':'#9fb4be')+';">'+(st.mute?'MUTED':'MUTE')+'</div>'
-          +(i>0?(function(){var g=st.live&&st.live.source==='GROUPED'&&st.live.coord===SONOS_UID[0];return '<div onclick="ampLinkZ('+i+')" title="Link this zone to Salon (play Salon audio, incl. the TV)" style="'+pill+'background:'+(g?'linear-gradient(180deg,#1d3a41,#16333a)':'linear-gradient(180deg,#26343f,#1a242d)')+';border:1px solid '+(g?'rgba(47,196,209,0.5)':'rgba(255,255,255,0.08)')+';color:'+(g?'#2fc4d1':'#9fb4be')+';">'+(g?'LINKED':'LINK')+'</div>';})():'')
         +'</div>'
       +'</div>'
       +'<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">'
@@ -1443,6 +1444,12 @@ av: function(){
         +'<div style="flex:1;position:relative;height:12px;border-radius:6px;background:#0d151b;box-shadow:inset 0 1px 3px rgba(0,0,0,0.6);overflow:hidden;"><div style="position:absolute;left:0;top:0;bottom:0;width:'+(st.mute?0:st.vol)+'%;background:linear-gradient(90deg,#1d3a41,#2fc4d1);"></div></div>'
         +'<div class="cond" style="width:66px;text-align:right;font-size:19px;font-weight:700;color:#e8f0f2;">'+(st.mute?'MUTE':'VOL '+st.vol)+'</div>'
         +'<div onclick="ampVolZ('+i+',5)" style="'+vbtn+'">+</div>'
+      +'</div>'
+      // GROUP row — pick which amp is the SOURCE (coordinator) and join/leave the group.
+      +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">'
+        +'<span style="font-size:9px;font-weight:700;letter-spacing:1.5px;color:#54687a;min-width:44px;">GROUP</span>'
+        +'<div onclick="ampSetSource('+i+')" title="Make this zone the source — the others play its audio" style="flex:1;height:34px;display:flex;align-items:center;justify-content:center;border-radius:8px;font-size:10px;font-weight:700;letter-spacing:0.5px;cursor:pointer;background:'+(mem.length?'linear-gradient(180deg,#1d3a41,#16333a)':'linear-gradient(180deg,#26343f,#1a242d)')+';border:1px solid '+(mem.length?'rgba(47,196,209,0.5)':'rgba(255,255,255,0.08)')+';color:'+(mem.length?'#2fc4d1':'#9fb4be')+';">'+(mem.length?'◉ SOURCE':'SET AS SOURCE')+'</div>'
+        +'<div onclick="ampLinkZ('+i+')" style="flex:1;height:34px;display:flex;align-items:center;justify-content:center;border-radius:8px;font-size:10px;font-weight:700;letter-spacing:0.5px;cursor:pointer;background:'+((isFollower||mem.length)?'linear-gradient(180deg,#3a2a1d,#2a1f16)':'linear-gradient(180deg,#26343f,#1a242d)')+';border:1px solid '+((isFollower||mem.length)?'rgba(255,184,77,0.4)':'rgba(255,255,255,0.08)')+';color:'+((isFollower||mem.length)?'#ffb84d':'#9fb4be')+';">'+(mem.length?'UNGROUP':(isFollower?'LEAVE':'JOIN SOURCE'))+'</div>'
       +'</div>'
       // source selector — Salon adds TV (only it's wired to the TV); every zone gets Spotify / Radio / Line
       +(function(){var srcs=(i===0?['TV','SPOTIFY','RADIO','LINE']:['SPOTIFY','RADIO','LINE']);
@@ -2119,10 +2126,22 @@ function tvToAmp(md){avCtrl('192.168.20.119:sonos','source','line');if(md)avCtrl
 function ampZoneSet(i){S.av.ampZone=i;render();}   // just re-targets; no command sent on switch
 // Link/unlink Sonos zones: join the other zones to the selected one (coordinator), or split all apart.
 function ampLinkAll(){var coordIp=SONOS_ZONES[0][1].split(':')[0];SONOS_ZONES.forEach(function(z,i){if(i!==0)avCtrl(z[1],'join',coordIp);});render();setTimeout(pollSonosNow,2000);setTimeout(pollSonosNow,5000);}
-// Per-zone link toggle: join this zone to Salon (plays Salon's audio, incl. the TV line-in) or unlink it.
-function ampLinkZ(i){var st=_az(i);var lv=st.live;var g=lv&&lv.source==='GROUPED'&&lv.coord===SONOS_UID[0];
-  if(g){avCtrl(SONOS_ZONES[i][1],'unjoin','');}else{avCtrl(SONOS_ZONES[i][1],'join',SONOS_ZONES[0][1].split(':')[0]);}
-  render();setTimeout(pollSonosNow,2000);setTimeout(pollSonosNow,5000);}
+// Index of the zone currently acting as source (has followers), or -1 if nothing is grouped.
+function _currentCoordIdx(){for(var i=0;i<SONOS_ZONES.length;i++)if(_groupMembers(i).length)return i;return -1;}
+// SET AS SOURCE: make zone i the coordinator and have the other zones play its audio.
+function ampSetSource(i){var coordIp=SONOS_ZONES[i][1].split(':')[0];
+  avCtrl(SONOS_ZONES[i][1],'unjoin','');   // become a standalone coordinator first (in case it was following)
+  setTimeout(function(){SONOS_ZONES.forEach(function(z,j){if(j!==i)avCtrl(z[1],'join',coordIp);});},700);   // others follow it
+  render();setTimeout(pollSonosNow,3000);setTimeout(pollSonosNow,6000);}
+// GROUP/JOIN/LEAVE toggle for zone i, relative to the current source.
+function ampLinkZ(i){var mem=_groupMembers(i);
+  if(mem.length){   // this zone is the source -> UNGROUP (release all its followers)
+    for(var j=0;j<SONOS_ZONES.length;j++){var lv=(S.av.z&&S.av.z[j])?S.av.z[j].live:null;if(lv&&lv.source==='GROUPED'&&lv.coord===SONOS_UID[i])avCtrl(SONOS_ZONES[j][1],'unjoin','');}
+  }else{var lvi=_az(i).live;
+    if(lvi&&lvi.source==='GROUPED'){avCtrl(SONOS_ZONES[i][1],'unjoin','');}   // follower -> LEAVE
+    else{var c=_currentCoordIdx();var t=(c>=0&&c!==i)?c:0;avCtrl(SONOS_ZONES[i][1],'join',SONOS_ZONES[t][1].split(':')[0]);}   // standalone -> JOIN the source (or Salon)
+  }
+  render();setTimeout(pollSonosNow,2500);setTimeout(pollSonosNow,5000);}
 // Per-zone independent amp control — each acts only on its own Sonos (SONOS_ZONES[i]).
 function _az(i){if(!S.av.z)S.av.z=[{vol:20,playing:false,mute:false},{vol:20,playing:false,mute:false},{vol:20,playing:false,mute:false}];return S.av.z[i];}
 function ampVolZ(i,d){var st=_az(i);st.vol=Math.max(0,Math.min(100,st.vol+d));st.mute=false;st.volT=Date.now();avCtrl(SONOS_ZONES[i][1],'volume',String(st.vol));render();}
