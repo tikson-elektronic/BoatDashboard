@@ -291,7 +291,7 @@
         <div style="display:flex;align-items:baseline;gap:12px;">
           <div class="cond" style="font-weight:600;font-size:24px;letter-spacing:10px;background:linear-gradient(180deg,#f4f9fb,#9fb4be);-webkit-background-clip:text;background-clip:text;color:transparent;">LAGOON</div>
         </div>
-        <div class="cond" style="font-weight:500;font-size:13px;letter-spacing:4px;color:#54687a;">630 MOTOR YACHT · VESSEL MONITOR · BUILD 1816</div>
+        <div class="cond" style="font-weight:500;font-size:13px;letter-spacing:4px;color:#54687a;">630 MOTOR YACHT · VESSEL MONITOR · BUILD 1819</div>
       </div>
     </div>
     <div style="flex:1;"></div>
@@ -318,7 +318,7 @@ var S = {
   zones:{courtesy:false,pfcabin:false,pfgang:false,pmcabin:false,galley:false,salon:false,sfcabin:false,sacabin:false},
   shades:{port:0,stbd:0,front:100,aft:50},
   night:false, lang:'EN', units:'L', dim:80,
-  av:{tvSalon:false,tvCabin:false,liftUp:true,liftAuto:false,liftMoving:'',swingMoving:'',amp:false,ampVol:40,ampSrc:'TV',ampMute:false,ampZone:0,ampLinked:false,tvVol:22,tvCh:5,tvInput:'TV',tvApp:'',tvMute:false,tvPlay:true,remoteFull:false,tvcVol:22,tvcCh:5,tvcInput:'TV',tvcApp:'',tvcMute:false,tvcPlay:true,tvcFull:false,devices:[],scanning:false},
+  av:{tvSalon:false,tvCabin:false,liftUp:true,liftAuto:false,liftMoving:'',swingMoving:'',tvAudioOut:'optical',amp:false,ampVol:40,ampSrc:'TV',ampMute:false,ampZone:0,ampLinked:false,tvVol:22,tvCh:5,tvInput:'TV',tvApp:'',tvMute:false,tvPlay:true,remoteFull:false,tvcVol:22,tvcCh:5,tvcInput:'TV',tvcApp:'',tvcMute:false,tvcPlay:true,tvcFull:false,devices:[],scanning:false},
   engines:{running:false,rpmP:1480,rpmS:1495},
   assist:{msgs:[],busy:false,listening:false,ready:false,unread:false},
   cams:{sel:0,ir:false,rec:true},
@@ -1286,6 +1286,15 @@ av: function(){
           +'<div style="font-size:9px;color:#4a5d6b;margin-top:7px;letter-spacing:0.4px;">'+(a.liftAuto?'Tap to run to the limit — stops automatically.':'Press &amp; hold to move — release to stop anywhere.')+'</div>'
         +'</div>';})()
     +'</div>'
+    // ---- TV AUDIO OUT: optical lands on the Salon amp line-in; toggle routes TV sound to the amp or leaves TV speakers ----
+    +'<div style="display:flex;align-items:center;gap:12px;margin-top:2px;flex-wrap:wrap;">'
+      +'<span style="font-size:10px;font-weight:700;letter-spacing:2px;color:#7d939e;">TV AUDIO</span>'
+      +'<div style="display:inline-flex;border:1px solid #2a3844;border-radius:9px;overflow:hidden;font-size:11px;font-weight:700;letter-spacing:1px;cursor:pointer;">'
+        +'<span onclick="setTvAudioOut(&quot;optical&quot;)" style="padding:9px 16px;background:'+(a.tvAudioOut!=='tv'?'#1d3a41':'transparent')+';color:'+(a.tvAudioOut!=='tv'?'#2fc4d1':'#7d939e')+';">OPTICAL &middot; AMP</span>'
+        +'<span onclick="setTvAudioOut(&quot;tv&quot;)" style="padding:9px 16px;background:'+(a.tvAudioOut==='tv'?'#1d3a41':'transparent')+';color:'+(a.tvAudioOut==='tv'?'#2fc4d1':'#7d939e')+';">TV SPEAKERS</span>'
+      +'</div>'
+      +'<span style="font-size:9px;color:#4a5d6b;">'+(a.tvAudioOut!=='tv'?'TV sound &rarr; Salon amp (LINE)':'Salon amp stopped')+'</span>'
+    +'</div>'
     // ---- TV SWING (only when fully up; left/right = 3rd/4th Shelly output). Always hold-to-move — no auto. ----
     +(function(){var up=a.liftUp;var mv=a.swingMoving||'';var pill='height:44px;padding:0 18px;display:flex;align-items:center;justify-content:center;border-radius:12px;font-size:11px;font-weight:700;letter-spacing:1px;cursor:pointer;user-select:none;touch-action:none;';
       function dirBtn(dir,label){var moving=mv===dir;var h=!up?'':('onpointerdown="swingHoldStart(&quot;'+dir+'&quot;)" onpointerup="swingHoldStop()" onpointerleave="swingHoldStop()" onpointercancel="swingHoldStop()"');
@@ -1657,7 +1666,8 @@ scenes: function(){
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin:26px 0 12px;"><div style="font-size:12px;font-weight:700;letter-spacing:2px;color:#7d939e;">AUTOMATIONS</div>'
       +'<div onclick="newAuto2()" style="height:36px;padding:0 18px;display:flex;align-items:center;border-radius:8px;background:#1d3a41;border:1px solid rgba(47,196,209,0.4);color:#2fc4d1;font-size:12px;font-weight:700;letter-spacing:1px;cursor:pointer;">＋ NEW AUTOMATION</div></div>'
     +'<div style="display:flex;flex-direction:column;gap:12px;max-width:860px;">'+autoCards+'</div>'
-    +'<div style="font-size:11px;color:#5d7280;line-height:1.5;margin-top:14px;max-width:860px;">Automations run on the helm dashboard even with no iPad connected. A scene applies only the settings you choose — anything left on “—” is untouched.</div>';
+    +'<div style="font-size:11px;color:#5d7280;line-height:1.5;margin-top:14px;max-width:860px;">Automations run on the helm dashboard even with no iPad connected. A scene applies only the settings you choose — anything left on “—” is untouched.</div>'
+    +liftAutoConfirmModal();
 },
 automation: function(){
   var TRIGS={time:'Time is after',batt:'Service battery below',tank:'Fresh water below',shore:'Shore power disconnects'};
@@ -2085,6 +2095,12 @@ function playStation(u){avCtrl(sonosId(),'playstream',u);}   // internet-radio g
 function playFav(i){avCtrl(sonosId(),'playfav',String(i));}   // Sonos favorite (Spotify playlist) on selected zone
 function musicStop(){avCtrl(sonosId(),'pause','');}
 // Route the Salon TV's audio into the Salon amp (source=TV); md=true also links Maindeck to play along.
+// TV audio-output routing. The Salon TV's optical out is wired to the Salon amp's LINE (RCA) input, so
+// "OPTICAL" = play that line-in on the Salon amp (you hear the TV); "TV" = stop the amp (TV's own speakers).
+function setTvAudioOut(mode){S.av.tvAudioOut=mode;var salon=SONOS_ZONES[0][1];
+  if(mode==='optical'){avCtrl(salon,'source','line');}   // TV optical lands on Salon amp line-in
+  else{avCtrl(salon,'pause','');}                          // leave the TV on its own speakers (amp stopped)
+  render();}
 function tvToAmp(md){avCtrl('192.168.20.119:sonos','source','tv');if(md)avCtrl('192.168.20.19:sonos','join','192.168.20.119');}
 function ampZoneSet(i){S.av.ampZone=i;render();}   // just re-targets; no command sent on switch
 // Link/unlink Sonos zones: join the other zones to the selected one (coordinator), or split all apart.
@@ -2204,9 +2220,28 @@ function abSet(key,val){if(!_autoEdit)return;
   else if(key==='scene'){_autoEdit.Actions=[{Type:'scene',Value:val}];}
   else if(key==='TriggerType'){_autoEdit.TriggerType=val;_autoEdit.TriggerParam=(val==='time'?'22:00':val==='daylight'?'dark':'');}
   else _autoEdit[key]=val;render();}
-function saveAuto2(){if(!_autoEdit)return;if(!_autoEdit.Name)_autoEdit.Name='Automation';
+var _liftConfirm=false,_liftConfirmed=false;
+function saveAuto2(){if(!_autoEdit)return;
+  var a0=(_autoEdit.Actions&&_autoEdit.Actions[0])?_autoEdit.Actions[0]:null;
+  var movesLift=false;   // direct lift action OR a scene that raises/lowers the lift
+  if(a0){ if(a0.Type==='lift'){movesLift=true;} else if(a0.Type==='scene'){var sc=(S.scenes||[]).filter(function(x){return x.id===a0.Value;})[0];if(sc&&sc.lift){movesLift=true;}} }
+  if(movesLift&&!_liftConfirmed){_liftConfirm=true;render();return;}   // require unattended-move acknowledgement
+  _liftConfirm=false;_liftConfirmed=false;
+  if(!_autoEdit.Name)_autoEdit.Name='Automation';
   if(!S.autos2)S.autos2=[];var idx=-1;for(var i=0;i<S.autos2.length;i++)if(S.autos2[i].Id===_autoEdit.Id)idx=i;
   if(idx>=0)S.autos2[idx]=_autoEdit;else S.autos2.push(_autoEdit);saveAutos2();_autoEdit=null;render();}
+function liftAutoConfirmYes(){_liftConfirmed=true;saveAuto2();}
+function liftAutoConfirmNo(){_liftConfirm=false;render();}
+function liftAutoConfirmModal(){if(!_liftConfirm)return '';
+  return '<div onclick="if(event.target===this)liftAutoConfirmNo()" style="position:fixed;inset:0;background:rgba(4,8,11,0.80);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px;">'
+    +'<div style="background:#0f171d;border:1px solid #4a2d2d;border-radius:16px;padding:26px;max-width:440px;box-shadow:0 24px 70px rgba(0,0,0,0.65);">'
+      +'<div style="font-size:17px;font-weight:700;color:#ff8a8c;letter-spacing:0.5px;margin-bottom:12px;">&#9888; Unattended TV lift</div>'
+      +'<div style="font-size:14px;color:#c2d2da;line-height:1.6;margin-bottom:22px;">This automation will raise or lower the Salon TV <b>automatically, with nobody present</b>.<br><br>You are responsible for making sure the lift path is <b>always physically clear</b> &mdash; no people, drinks, or objects in the way &mdash; whenever this can fire. The dashboard cannot detect obstructions.</div>'
+      +'<div style="display:flex;gap:10px;justify-content:flex-end;">'
+        +'<div onclick="liftAutoConfirmNo()" style="height:44px;padding:0 22px;display:flex;align-items:center;border-radius:9px;background:#1a242d;border:1px solid #2a3844;color:#9fb4be;font-size:13px;font-weight:700;cursor:pointer;">CANCEL</div>'
+        +'<div onclick="liftAutoConfirmYes()" style="height:44px;padding:0 20px;display:flex;align-items:center;border-radius:9px;background:linear-gradient(180deg,#5a2222,#3a1616);border:1px solid rgba(255,77,79,0.55);color:#ff9a9c;font-size:13px;font-weight:700;letter-spacing:0.5px;cursor:pointer;">I UNDERSTAND &mdash; CREATE</div>'
+      +'</div>'
+    +'</div></div>';}
 function delAuto2(id){S.autos2=(S.autos2||[]).filter(function(x){return x.Id!==id;});saveAutos2();render();}
 function tglAuto2(id){var a=(S.autos2||[]).filter(function(x){return x.Id===id;})[0];if(a){a.Enabled=!a.Enabled;saveAutos2();render();}}
 var _sceneEdit=null,_autoEdit=null,_sceneMsg='',_scenesLoaded=false;
