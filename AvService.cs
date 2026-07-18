@@ -761,7 +761,11 @@ public sealed class AvService
         var mr = await SoapRawAsync(rctrl, "RenderingControl", "GetMute", "<InstanceID>0</InstanceID><Channel>Master</Channel>");
         if (mr is not null) mute = Rx1(mr, "<CurrentMute>(.*?)</CurrentMute>") == "1";
 
-        return JsonSerializer.Serialize(new { source, playing, title, artist, volume, mute });
+        // When grouped, the zone plays x-rincon:<coordinatorUID> — expose that UID so the UI can show the
+        // real-time group topology (which zone is following which coordinator).
+        string coord = u.StartsWith("x-rincon:") ? uri.Substring(9).Split('?')[0] : "";
+
+        return JsonSerializer.Serialize(new { source, playing, title, artist, volume, mute, coord });
     }
 
     // ---- Generic UPnP MediaRenderer (SOAP) ----
