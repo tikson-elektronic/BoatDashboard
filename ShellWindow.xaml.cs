@@ -356,6 +356,15 @@ window.addEventListener('DOMContentLoaded', function(){
                     try { _ = Web.CoreWebView2?.ExecuteScriptAsync($"window.runSceneById && window.runSceneById('{sid}')"); } catch { }
                 });
                 break;
+            case "lift":
+                // Direct motorised-lift action: Value = "tvlift:up" | "tvlift:down" (raise/lower to the limit).
+                // Runs the Shelly motor straight through the service (AUTO mode, hold=false), no scene needed.
+                {
+                    var parts = (a.Value ?? "").Split(':');
+                    if (parts.Length == 2 && _shelly is not null)
+                        await _shelly.CommandAsync(parts[0], parts[1], false);
+                }
+                break;
         }
     }
 

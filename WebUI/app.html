@@ -197,7 +197,10 @@
 </style>
 <style>
   html,body{margin:0;padding:0;background:#0a1014;height:100%;}
-  *{box-sizing:border-box;}
+  /* Kiosk touch behaviour: no long-press magnifier/callout loupe, no grey tap-highlight, no text selection. */
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;}
+  /* keep real inputs usable (scene/automation name, time pickers, dropdowns) */
+  input,textarea,select{-webkit-user-select:auto;user-select:auto;-webkit-touch-callout:default;}
   a{color:#2fc4d1;text-decoration:none;} a:hover{color:#7de3ec;}
   body{font-family:'Barlow',-apple-system,'Helvetica Neue',Segoe UI,Arial,sans-serif;color:#e8f0f2;}
   @keyframes pulseDot{0%,100%{opacity:1;}50%{opacity:.35;}}
@@ -288,7 +291,7 @@
         <div style="display:flex;align-items:baseline;gap:12px;">
           <div class="cond" style="font-weight:600;font-size:24px;letter-spacing:10px;background:linear-gradient(180deg,#f4f9fb,#9fb4be);-webkit-background-clip:text;background-clip:text;color:transparent;">LAGOON</div>
         </div>
-        <div class="cond" style="font-weight:500;font-size:13px;letter-spacing:4px;color:#54687a;">630 MOTOR YACHT · VESSEL MONITOR · BUILD 1811</div>
+        <div class="cond" style="font-weight:500;font-size:13px;letter-spacing:4px;color:#54687a;">630 MOTOR YACHT · VESSEL MONITOR · BUILD 1816</div>
       </div>
     </div>
     <div style="flex:1;"></div>
@@ -1126,12 +1129,12 @@ shades: function(){
     var louvres='';
     for(var i=0;i<8;i++){louvres+='<div style="flex:1;background:linear-gradient(180deg,#31414f,#1c2833 60%,#141d25);border-bottom:1px solid rgba(0,0,0,0.5);"></div>';}
     return '<div class="card" onpointerdown="lpStart(&quot;'+mk+'&quot;,&quot;'+d[1]+'&quot;)" onpointerup="lpCancel()" onpointerleave="lpCancel()" onpointercancel="lpCancel()" style="padding:22px;display:flex;flex-direction:column;gap:16px;">'
-      +'<div style="display:flex;align-items:center;justify-content:space-between;">'
-        +'<div><div style="font-size:13px;font-weight:700;letter-spacing:2px;">'+d[1]+'</div><div style="font-size:12px;color:#7d939e;margin-top:3px;">'+d[2]+'</div></div>'
-        +(function(){var st=_shadeStatus[mk];
+      +'<div style="display:flex;align-items:flex-start;justify-content:space-between;height:52px;flex:0 0 auto;">'
+        +'<div style="min-width:0;flex:1;"><div style="font-size:13px;font-weight:700;letter-spacing:2px;height:36px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">'+d[1]+'</div><div style="font-size:12px;color:#7d939e;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+d[2]+'</div></div>'
+        +'<div style="flex:0 0 auto;margin-left:10px;white-space:nowrap;">'+(function(){var st=_shadeStatus[mk];
           if(st&&st.alarm)return '<div style="font-size:11px;font-weight:700;letter-spacing:1px;color:#ff6b6d;padding:3px 9px;border-radius:6px;background:rgba(255,77,79,0.12);border:1px solid rgba(255,77,79,0.5);">&#9888; OFFLINE</div>';
           if(st&&!st.online)return '<div style="font-size:11px;font-weight:700;letter-spacing:1px;color:#ffb648;">OFFLINE</div>';
-          return '<div style="font-size:12px;font-weight:700;letter-spacing:1.5px;color:'+scol+';">'+status+'</div>';})()
+          return '<div style="font-size:12px;font-weight:700;letter-spacing:1.5px;color:'+scol+';">'+status+'</div>';})()+'</div>'
       +'</div>'
       +'<div style="position:relative;height:120px;border-radius:10px;overflow:hidden;border:2px solid #2a3844;background:linear-gradient(180deg,#7db8d6 0%,#a8cfe2 55%,#4e7f9c 56%,#3a6076 100%);box-shadow:inset 0 2px 10px rgba(0,0,0,0.35);">'
         +'<div id="shadePanel-'+k+'" style="position:absolute;left:0;right:0;top:0;height:'+pct+'%;display:flex;flex-direction:column;box-shadow:0 3px 8px rgba(0,0,0,0.45);">'+louvres+'</div>'
@@ -1249,7 +1252,7 @@ av: function(){
     +'<div style="display:flex;align-items:center;justify-content:space-between;"><div><div style="font-size:13px;font-weight:700;letter-spacing:2px;">SALON TV</div><div style="font-size:12px;color:#7d939e;margin-top:3px;">55\u2033 \u00b7 motorised lift</div></div>'
     +'<div style="display:flex;align-items:center;gap:8px;"><div style="width:8px;height:8px;border-radius:50%;background:'+(a.tvBooting?'#ffd66b':(a.tvSalon?OK:'#2a3844'))+';'+((a.tvSalon||a.tvBooting)?'box-shadow:0 0 8px rgba(53,208,127,0.7);':'')+'"></div><span style="font-size:11px;font-weight:700;letter-spacing:1.5px;color:'+(a.tvBooting?'#ffd66b':(a.tvSalon?OK:'#7d939e'))+';">'+(a.tvBooting?'STARTING':(a.tvSalon?'ON':'STANDBY'))+'</span></div></div>'
     +'<div style="position:relative;height:150px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,#0e161d,#131b22);">'
-      +'<div id="tvLift" style="position:absolute;left:50%;width:150px;margin-left:-75px;height:90px;border-radius:6px;border:3px solid #2a3844;top:'+(lift?'12px':'118px')+';background:'+(a.tvSalon?(a.tvApp==='NETFLIX'?'linear-gradient(135deg,#3d0508,#e50914 70%)':a.tvApp==='YOUTUBE'?'linear-gradient(135deg,#3d0000,#ff0000 70%)':a.tvApp==='PLEX'?'linear-gradient(135deg,#3d2a00,#e5a00d 70%)':a.tvApp==='SPOTIFY'?'linear-gradient(135deg,#00381b,#1db954 70%)':'linear-gradient(135deg,#1a4a5c,#2fc4d1 60%,#7de3ec)'):'linear-gradient(180deg,#0a0f14,#141d25)')+';box-shadow:0 6px 16px rgba(0,0,0,0.6)'+(a.tvSalon?',0 0 24px rgba(47,196,209,0.35)':'')+';display:flex;align-items:center;justify-content:center;">'
+      +'<div id="tvLift" style="position:absolute;left:50%;width:150px;margin-left:-75px;height:90px;border-radius:6px;border:3px solid #2a3844;top:'+_liftCurrent()+'px;background:'+(a.tvSalon?(a.tvApp==='NETFLIX'?'linear-gradient(135deg,#3d0508,#e50914 70%)':a.tvApp==='YOUTUBE'?'linear-gradient(135deg,#3d0000,#ff0000 70%)':a.tvApp==='PLEX'?'linear-gradient(135deg,#3d2a00,#e5a00d 70%)':a.tvApp==='SPOTIFY'?'linear-gradient(135deg,#00381b,#1db954 70%)':'linear-gradient(135deg,#1a4a5c,#2fc4d1 60%,#7de3ec)'):'linear-gradient(180deg,#0a0f14,#141d25)')+';box-shadow:0 6px 16px rgba(0,0,0,0.6)'+(a.tvSalon?',0 0 24px rgba(47,196,209,0.35)':'')+';display:flex;align-items:center;justify-content:center;">'
       +(a.tvSalon?'<span class="cond" style="font-size:15px;font-weight:700;letter-spacing:2px;color:rgba(255,255,255,0.92);text-shadow:0 1px 4px rgba(0,0,0,0.6);">'+(a.tvApp?a.tvApp:(a.tvInput==='TV'?'CH '+a.tvCh:a.tvInput))+'</span>':'')
       +'</div>'
       +'<div style="position:absolute;left:0;right:0;bottom:0;height:38px;background:linear-gradient(180deg,#26343f,#1a242d);border-top:2px solid #31414f;box-shadow:0 -4px 10px rgba(0,0,0,0.5);"></div>'
@@ -1263,14 +1266,24 @@ av: function(){
         +'<span class="cond" style="font-size:17px;font-weight:600;letter-spacing:1.5px;color:'+(a.tvSalon?'#2fc4d1':'#54687a')+';">'+(a.tvSalon?(a.tvApp?a.tvApp:(a.tvInput==='TV'?('CH '+a.tvCh):a.tvInput)):'STANDBY')+'</span>'
         +'<span class="cond" style="font-size:17px;font-weight:700;color:'+(a.tvSalon?'#e8f0f2':'#26333e')+';margin-left:auto;">'+(a.tvSalon?(a.tvMute?'MUTED':'VOL '+a.tvVol):'')+'</span>'
       +'</div>'
-      +(function(){var mv=a.liftMoving||'';var pill='height:48px;padding:0 14px;display:flex;align-items:center;justify-content:center;border-radius:12px;font-size:11px;font-weight:700;letter-spacing:1px;cursor:pointer;user-select:none;touch-action:none;';
-        function dirBtn(dir,label){var moving=mv===dir;var h=a.liftAuto?('onclick="liftGo(&quot;'+dir+'&quot;)"'):('onpointerdown="liftHoldStart(&quot;'+dir+'&quot;)" onpointerup="liftHoldStop()" onpointerleave="liftHoldStop()" onpointercancel="liftHoldStop()"');
-          return '<div '+h+' style="'+pill+'background:'+(moving?'linear-gradient(180deg,#1d3a41,#16333a)':'linear-gradient(180deg,#26343f,#1a242d)')+';border:1px solid '+(moving?'rgba(47,196,209,0.6)':'rgba(255,255,255,0.08)')+';color:'+(moving?'#2fc4d1':'#c2d2da')+';">'+label+'</div>';}
-        return '<div style="display:flex;align-items:center;gap:6px;">'
-          +'<div onclick="liftModeToggle()" title="HOLD = move only while pressed. AUTO = run to the limit switch (auto-stops after the safety timer)." style="height:48px;padding:0 12px;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:12px;cursor:pointer;background:'+(a.liftAuto?'linear-gradient(180deg,#1d3a41,#16333a)':'linear-gradient(180deg,#26343f,#1a242d)')+';border:1px solid '+(a.liftAuto?'rgba(47,196,209,0.5)':'rgba(255,255,255,0.08)')+';color:'+(a.liftAuto?'#2fc4d1':'#9fb4be')+';"><span style="font-size:10px;font-weight:700;letter-spacing:1px;">'+(a.liftAuto?'AUTO':'HOLD')+'</span><span style="font-size:7px;color:#54687a;letter-spacing:0.5px;">'+(a.liftAuto?'to limit':'press &amp; hold')+'</span></div>'
-          +dirBtn('up','▲ UP')
-          +(a.liftAuto?'<div onclick="liftStop()" style="'+pill+'background:linear-gradient(180deg,#3a1d1d,#331616);border:1px solid rgba(255,77,79,0.4);color:#ff8a8c;">■</div>':'')
-          +dirBtn('down','▼ DN')
+      +(function(){var mv=a.liftMoving||'';
+        var pill='height:58px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border-radius:13px;font-weight:700;cursor:pointer;user-select:none;touch-action:none;transition:box-shadow .15s,border-color .15s,background .15s;';
+        function dirBtn(dir,icon,label){var moving=mv===dir;
+          var h=a.liftAuto?('onclick="liftGo(&quot;'+dir+'&quot;)"'):('onpointerdown="liftHoldStart(&quot;'+dir+'&quot;)" onpointerup="liftHoldStop()" onpointerleave="liftHoldStop()" onpointercancel="liftHoldStop()"');
+          return '<div '+h+' style="'+pill+'flex:1;background:'+(moving?'linear-gradient(180deg,#20424a,#16333a)':'linear-gradient(180deg,#26343f,#1a242d)')+';border:1px solid '+(moving?'#2fc4d1':'rgba(255,255,255,0.09)')+';color:'+(moving?'#2fc4d1':'#c2d2da')+';box-shadow:'+(moving?'0 0 18px rgba(47,196,209,0.28),inset 0 1px 0 rgba(255,255,255,0.06)':'0 2px 5px rgba(0,0,0,0.4),inset 0 1px 0 rgba(255,255,255,0.05)')+';">'
+            +'<span style="font-size:19px;line-height:1;">'+icon+'</span><span style="font-size:10px;letter-spacing:2px;">'+label+'</span></div>';}
+        function seg(t){var on=(t==='AUTO')===!!a.liftAuto;return '<span style="padding:6px 15px;background:'+(on?'#1d3a41':'transparent')+';color:'+(on?'#2fc4d1':'#54687a')+';transition:all .15s;">'+t+'</span>';}
+        return '<div style="width:100%;margin-top:2px;">'
+          +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;">'
+            +'<span style="font-size:10px;font-weight:700;letter-spacing:2px;color:#7d939e;">TV LIFT'+(mv?' <span style="color:#2fc4d1;">· '+(mv==='up'?'RAISING':'LOWERING')+'</span>':'')+'</span>'
+            +'<div onclick="liftModeToggle()" title="HOLD = moves only while pressed. AUTO = runs to the limit, auto-stops." style="display:inline-flex;border:1px solid #2a3844;border-radius:9px;overflow:hidden;cursor:pointer;font-size:10px;font-weight:700;letter-spacing:1.5px;">'+seg('HOLD')+seg('AUTO')+'</div>'
+          +'</div>'
+          +'<div style="display:flex;gap:10px;">'
+            +dirBtn('up','▲','RAISE')
+            +(a.liftAuto&&mv?'<div onclick="liftStop()" style="'+pill+'width:72px;background:linear-gradient(180deg,#3a1d1d,#331616);border:1px solid rgba(255,77,79,0.5);color:#ff8a8c;box-shadow:0 0 16px rgba(255,77,79,0.25);"><span style="font-size:15px;line-height:1;">■</span><span style="font-size:9px;letter-spacing:1px;">STOP</span></div>':'')
+            +dirBtn('down','▼','LOWER')
+          +'</div>'
+          +'<div style="font-size:9px;color:#4a5d6b;margin-top:7px;letter-spacing:0.4px;">'+(a.liftAuto?'Tap to run to the limit — stops automatically.':'Press &amp; hold to move — release to stop anywhere.')+'</div>'
         +'</div>';})()
     +'</div>'
     // ---- TV SWING (only when fully up; left/right = 3rd/4th Shelly output). Always hold-to-move — no auto. ----
@@ -1279,8 +1292,8 @@ av: function(){
         return '<div '+h+' style="'+pill+'background:'+(moving?'linear-gradient(180deg,#1d3a41,#16333a)':'linear-gradient(180deg,#26343f,#1a242d)')+';border:1px solid '+(moving?'rgba(47,196,209,0.6)':'rgba(255,255,255,0.08)')+';color:'+(moving?'#2fc4d1':'#c2d2da')+';">'+label+'</div>';}
       return '<div style="display:flex;align-items:center;gap:8px;opacity:'+(up?1:0.45)+';transition:opacity .3s;">'
         +'<span style="font-size:9px;font-weight:700;letter-spacing:1.5px;color:#54687a;min-width:64px;">SWING</span><span style="font-size:8px;color:#3f5261;letter-spacing:0.5px;margin-left:-4px;">hold</span>'
-        +dirBtn('up','◀ LEFT')
-        +dirBtn('down','RIGHT ▶')
+        +dirBtn('up','◀ FWD')
+        +dirBtn('down','HOME ▶')
         +(up?'':'<span style="font-size:9px;color:#54687a;margin-left:4px;">raise TV fully up first</span>')
       +'</div>';})()
     +'<div style="opacity:'+(a.tvSalon?1:0.35)+';pointer-events:'+(a.tvSalon?'auto':'none')+';transition:opacity .3s;display:flex;flex-direction:column;gap:14px;">'
@@ -1597,7 +1610,12 @@ scenes: function(){
       +'<div class="card" style="padding:20px 22px;">'
         +'<input value="'+esc(au.Name)+'" oninput="abSet(&quot;Name&quot;,this.value)" placeholder="Automation name (e.g. Movie at 10pm)" style="width:100%;box-sizing:border-box;height:40px;padding:0 12px;border-radius:8px;background:#0d151b;border:1px solid #2a3844;color:#e8f0f2;font-size:15px;font-weight:600;margin-bottom:16px;">'
         +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;"><span style="'+lbl+'">WHEN</span>'+sel('abSet(&quot;TriggerType&quot;,this.value)',trigOpts,au.TriggerType)+trigVal+'</div>'
-        +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span style="'+lbl+'">RUN SCENE</span>'+sel('abSet(&quot;scene&quot;,this.value)',sceneOpts,(au.Actions&&au.Actions[0])?au.Actions[0].Value:'')+'</div>'
+        +(function(){var a0=(au.Actions&&au.Actions[0])?au.Actions[0]:{Type:'scene',Value:''};
+          var doVal=(a0.Type==='lift')?('lift:'+a0.Value):'scene';
+          var doOpts=[['scene','Run a scene'],['lift:tvlift:up','Raise TV lift'],['lift:tvlift:down','Lower TV lift']];
+          var h='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span style="'+lbl+'">DO</span>'+sel('abSet(&quot;do&quot;,this.value)',doOpts,doVal)+'</div>';
+          if(a0.Type!=='lift')h+='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;"><span style="'+lbl+'">SCENE</span>'+sel('abSet(&quot;scene&quot;,this.value)',sceneOpts,a0.Value||'')+'</div>';
+          return h;})()
         +'<div style="display:flex;gap:10px;margin-top:20px;">'
           +'<div onclick="saveAuto2()" style="height:42px;padding:0 26px;display:flex;align-items:center;border-radius:8px;background:#2fc4d1;color:#0a1014;font-size:13px;font-weight:700;letter-spacing:1px;cursor:pointer;">SAVE</div>'
           +'<div onclick="cancelAuto2()" style="height:42px;padding:0 22px;display:flex;align-items:center;border-radius:8px;background:#1a242d;border:1px solid #2a3844;color:#9fb4be;font-size:13px;font-weight:700;cursor:pointer;">CANCEL</div>'
@@ -1621,10 +1639,11 @@ scenes: function(){
   if(!scenes.length)sceneCards='<div class="card" style="padding:24px;text-align:center;color:#7d939e;font-size:14px;">No scenes yet — tap ＋ NEW SCENE.</div>';
   function sceneName(id){var s=scenes.filter(function(x){return x.id===id;})[0];return s?(s.name||'(unnamed)'):'(deleted scene)';}
   var autoCards=autos.map(function(a){var when=a.TriggerType==='time'?('at '+a.TriggerParam):a.TriggerType==='daylight'?(a.TriggerParam==='light'?'at sunrise':'at sunset'):a.TriggerParam;
-    var sid=(a.Actions&&a.Actions[0])?a.Actions[0].Value:'';
+    var a0=(a.Actions&&a.Actions[0])?a.Actions[0]:null;
+    var actLbl=(a0&&a0.Type==='lift')?(a0.Value==='tvlift:up'?'raise TV lift':'lower TV lift'):('run '+sceneName((a0&&a0.Value)||''));
     return '<div class="card" style="padding:16px 20px;display:flex;align-items:center;gap:14px;'+(a.Enabled?'':'opacity:0.5;')+'">'
       +'<div style="flex:1;min-width:0;"><div style="font-size:15px;font-weight:700;color:#e8f0f2;">'+esc(a.Name||'(unnamed)')+'</div>'
-        +'<div style="font-size:12px;color:#9fb4be;margin-top:3px;"><span style="color:#7d939e;font-weight:700;font-size:10px;letter-spacing:1px;">'+esc(when)+'</span> → run <span style="color:#2fc4d1;">'+esc(sceneName(sid))+'</span></div></div>'
+        +'<div style="font-size:12px;color:#9fb4be;margin-top:3px;"><span style="color:#7d939e;font-weight:700;font-size:10px;letter-spacing:1px;">'+esc(when)+'</span> → <span style="color:#2fc4d1;">'+esc(actLbl)+'</span></div></div>'
       +'<div onclick="editAuto2(&quot;'+a.Id+'&quot;)" style="height:38px;padding:0 16px;display:flex;align-items:center;border-radius:8px;background:#1a242d;border:1px solid #2a3844;color:#9fb4be;font-size:12px;font-weight:700;cursor:pointer;">EDIT</div>'
       +'<div onclick="delAuto2(&quot;'+a.Id+'&quot;)" style="width:38px;height:38px;border-radius:8px;display:flex;align-items:center;justify-content:center;border:1px solid #2a3844;color:#7d939e;cursor:pointer;">✕</div>'
       +sw(a.Enabled,'tglAuto2(&quot;'+a.Id+'&quot;)')
@@ -1997,8 +2016,7 @@ function engRpm(k,v){S.engines[k]=parseInt(v,10);render();}
 function tvId(){var ds=S.av.devices||[];for(var i=0;i<ds.length;i++){var d=ds[i];if((d.protocol||d.Protocol)==='samsung')return d.id||d.Id;}return '192.168.20.77:samsung';}
 function avSet(k,v){
   if(k==='liftUp'&&S.av.liftUp!==v){
-    var curT=_liftCurrent();
-    _liftAnim={from:curT,to:v?12:118,start:Date.now(),dur:Math.abs((v?12:118)-curT)/106*motorSecs('tvlift',10)*1000};   // matches the lift travel timer
+    _liftAnimStart(v?12:118);   // tween the on-screen TV at the real motor speed
     S.av[k]=v;shellyMotor('tvlift',v?'up':'down');render();
     return;
   }
@@ -2152,6 +2170,7 @@ function runScene(sc){if(!sc)return;
   if(sc.lights){if(sc.lights.all==='on')bitSend('all_on',0);else if(sc.lights.all==='off')bitSend('all_off',0);
     if(sc.lights.nav){var n=sc.lights.nav==='on';if(!!S.navLights!==n)tgl('navLights');}
     if(sc.lights.anchor){var an=sc.lights.anchor==='on';if(!!S.anchorLight!==an)tgl('anchorLight');}}
+  if(sc.lift==='up')_liftAnimStart(12);else if(sc.lift==='down')_liftAnimStart(118);   // animate the on-screen TV to match
   if(sc.lift==='up')shellyMotor('tvlift','up');else if(sc.lift==='down')shellyMotor('tvlift','down');
   if(typeof render==='function')render();}
 function runSceneById(id){var sc=(S.scenes||[]).filter(function(x){return x.id===id;})[0];
@@ -2178,7 +2197,11 @@ function newAuto2(){var sid=(S.scenes&&S.scenes[0])?S.scenes[0].id:'';_autoEdit=
 function editAuto2(id){var a=(S.autos2||[]).filter(function(x){return x.Id===id;})[0];if(a)_autoEdit=JSON.parse(JSON.stringify(a));render();}
 function cancelAuto2(){_autoEdit=null;render();}
 function abSet(key,val){if(!_autoEdit)return;
-  if(key==='scene'){_autoEdit.Actions=[{Type:'scene',Value:val}];}
+  if(key==='do'){
+    if(val==='scene'){var sid=(S.scenes&&S.scenes[0])?S.scenes[0].id:'';_autoEdit.Actions=[{Type:'scene',Value:sid}];}
+    else if(val.indexOf('lift:')===0){_autoEdit.Actions=[{Type:'lift',Value:val.substr(5)}];}   // "lift:tvlift:up"
+  }
+  else if(key==='scene'){_autoEdit.Actions=[{Type:'scene',Value:val}];}
   else if(key==='TriggerType'){_autoEdit.TriggerType=val;_autoEdit.TriggerParam=(val==='time'?'22:00':val==='daylight'?'dark':'');}
   else _autoEdit[key]=val;render();}
 function saveAuto2(){if(!_autoEdit)return;if(!_autoEdit.Name)_autoEdit.Name='Automation';
@@ -2187,24 +2210,39 @@ function saveAuto2(){if(!_autoEdit)return;if(!_autoEdit.Name)_autoEdit.Name='Aut
 function delAuto2(id){S.autos2=(S.autos2||[]).filter(function(x){return x.Id!==id;});saveAutos2();render();}
 function tglAuto2(id){var a=(S.autos2||[]).filter(function(x){return x.Id===id;})[0];if(a){a.Enabled=!a.Enabled;saveAutos2();render();}}
 var _sceneEdit=null,_autoEdit=null,_sceneMsg='',_scenesLoaded=false;
-var _liftAnim=null;
+// TV-lift on-screen simulation. _liftRest = current resting top (12 = fully up … 118 = fully down);
+// _liftAnim tweens between positions over the real motor travel time so the graphic mirrors the motor,
+// and a HOLD release freezes it wherever it is (partial positions persist).
+var _liftAnim=null, _liftRest=(typeof S!=='undefined'&&S.av&&!S.av.liftUp)?118:12;
 function _liftCurrent(){
-  if(!_liftAnim)return S.av.liftUp?12:118;
+  if(!_liftAnim)return _liftRest;
   var t=Math.min(1,(Date.now()-_liftAnim.start)/_liftAnim.dur);
-  if(t>=1){_liftAnim=null;return S.av.liftUp?12:118;}
-  return _liftAnim.from+(_liftAnim.to-_liftAnim.from)*t;
+  var cur=_liftAnim.from+(_liftAnim.to-_liftAnim.from)*t;
+  if(t>=1){_liftRest=_liftAnim.to;_liftAnim=null;}
+  return cur;
 }
 function _applyLiftAnim(){
-  if(!_liftAnim)return;
-  var el=document.getElementById('tvLift');
-  if(!el)return;
+  var el=document.getElementById('tvLift');if(!el)return;
+  if(!_liftAnim){el.style.transition='none';el.style.top=_liftRest+'px';return;}
   var t=Math.min(1,(Date.now()-_liftAnim.start)/_liftAnim.dur);
-  if(t>=1){_liftAnim=null;return;}
+  if(t>=1){_liftRest=_liftAnim.to;_liftAnim=null;el.style.transition='none';el.style.top=_liftRest+'px';return;}
   var cur=_liftAnim.from+(_liftAnim.to-_liftAnim.from)*t;
   var remain=_liftAnim.dur*(1-t)/1000;
   el.style.transition='none';el.style.top=cur+'px';
   void el.offsetHeight;
   el.style.transition='top '+remain+'s linear';el.style.top=_liftAnim.to+'px';
+}
+// Start tweening the TV toward a target top (12 up / 118 down) at the motor's real speed.
+function _liftAnimStart(targetTop){
+  var cur=_liftCurrent();
+  var dur=Math.abs(targetTop-cur)/106*motorSecs('tvlift',10)*1000;
+  _liftAnim={from:cur,to:targetTop,start:Date.now(),dur:Math.max(60,dur)};
+}
+// Freeze the TV where it currently is (HOLD release / STOP) and reconcile liftUp for the swing gate.
+function _liftAnimFreeze(){
+  _liftRest=_liftCurrent();_liftAnim=null;
+  var el=document.getElementById('tvLift');if(el){el.style.transition='none';el.style.top=_liftRest+'px';}
+  S.av.liftUp=(_liftRest<=13);
 }
 // Drive a configured Shelly motor (TV lift / swing / shade) up/down/stop over the dashboard's MQTT broker.
 // hold=true marks a dead-man heartbeat: the backend arms a ~700ms watchdog that re-arms on each ping and
@@ -2256,10 +2294,10 @@ window.addEventListener('blur',function(){if(_hold.key)_holdEnd();});
 document.addEventListener('visibilitychange',function(){if(document.hidden&&_hold.key)_holdEnd();});
 // TV LIFT (up/down) — HOLD (dead-man: moves only while pressed) or AUTO (runs to limit, timeout backstop).
 function liftModeToggle(){S.av.liftAuto=!S.av.liftAuto;_holdEnd();S.av.liftMoving='';S.av.swingMoving='';shellyMotor('tvlift','stop');shellyMotor('tvswing','stop');render();}
-function liftGo(dir){S.av.liftMoving=dir;S.av.liftUp=(dir==='up');shellyMotor('tvlift',dir);render();}   // AUTO: run to limit
-function liftHoldStart(dir){S.av.liftMoving=dir;S.av.liftUp=(dir==='up');_holdBegin('tvlift',dir);render();}
-function liftHoldStop(){_holdEnd();}
-function liftStop(){_holdEnd();S.av.liftMoving='';shellyMotor('tvlift','stop');render();}
+function liftGo(dir){S.av.liftMoving=dir;S.av.liftUp=(dir==='up');_liftAnimStart(dir==='up'?12:118);shellyMotor('tvlift',dir);render();}   // AUTO: run to limit
+function liftHoldStart(dir){S.av.liftMoving=dir;S.av.liftUp=(dir==='up');_liftAnimStart(dir==='up'?12:118);_holdBegin('tvlift',dir);render();}
+function liftHoldStop(){_liftAnimFreeze();S.av.liftMoving='';_holdEnd();render();}
+function liftStop(){_liftAnimFreeze();S.av.liftMoving='';_holdEnd();shellyMotor('tvlift','stop');render();}
 // TV SWING (left/right) — only when fully up. Always hold-to-move. up-action = left output, down-action = right.
 function swingHoldStart(dir){if(!S.av.liftUp)return;S.av.swingMoving=dir;_holdBegin('tvswing',dir);render();}
 function swingHoldStop(){_holdEnd();}

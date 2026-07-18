@@ -482,7 +482,7 @@ public sealed class LocalServer : IDisposable
                     try { using var d = JsonDocument.Parse(b);
                         key = d.RootElement.TryGetProperty("key", out var k) ? k.GetString() ?? "" : "";
                         act = d.RootElement.TryGetProperty("action", out var a) ? a.GetString() ?? "" : "";
-                        hold = d.RootElement.TryGetProperty("hold", out var h) && (h.ValueKind == JsonValueKind.True || (h.ValueKind == JsonValueKind.String && h.GetString() == "1"));
+                        hold = d.RootElement.TryGetProperty("hold", out var h) && (h.ValueKind == JsonValueKind.True || (h.ValueKind == JsonValueKind.String && h.GetString() == "1") || (h.ValueKind == JsonValueKind.Number && h.TryGetDouble(out var hv) && hv != 0));
                         if (d.RootElement.TryGetProperty("target", out var tg) && tg.TryGetDouble(out var tv)) target = tv; } catch { }
                     var kc = key; var ac = act; var hc = hold; var tc = target;
                     if (ac == "goto" && tc >= 0)

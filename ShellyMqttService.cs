@@ -353,11 +353,11 @@ public sealed class ShellyMqttService : IDisposable
         return Task.CompletedTask;
     }
 
-    private async Task SetOutput(string topic, int id, bool on)
+    private async Task SetOutput(ShellyMotor m, int id, bool on)
     {
         if (_server is null) return;
         var msg = new MqttApplicationMessageBuilder()
-            .WithTopic($"{topic}/command/switch:{id}")
+            .WithTopic($"{m.Topic}/command/switch:{id}")
             .WithPayload(on ? "on" : "off")
             .Build();
         try { await _server.InjectApplicationMessage(new InjectedMqttApplicationMessage(msg) { SenderClientId = "dashboard" }); } catch { }
@@ -379,7 +379,7 @@ public sealed class ShellyMqttService : IDisposable
         double delay = ms.Max(m => Math.Clamp(m.StartDelaySec, 0.0, 5.0));   // startup dead-time before it moves
         double moveTime = Math.Max(0.1, travel - delay);
 
-        async Task AllOff() { foreach (var m in ms) { await SetOutput(m.Topic, m.UpOut, false); await SetOutput(m.Topic, m.DownOut, false); } }
+        async Task AllOff() { foreach (var m in ms) { await SetOutput(m, m.UpOut, false); await SetOutput(m, m.DownOut, false); } }
         // Freeze the live position estimate into _pos (call before changing/stopping a move) + persist it.
         void FreezePos() { _pos[key] = CurrentPos(key, travel, delay); _moveStartT.TryRemove(key, out _); SavePositions(); }
 
@@ -407,27 +407,35 @@ public sealed class ShellyMqttService : IDisposable
             double distance = up ? pos : (1.0 - pos);                       // fraction still to travel this way
             // time to reach the limit = the startup dead-time + the actual movement time for that distance
             double remaining = Math.Clamp(delay + distance * moveTime, 0.0, travel);
-            if (distance < 0.02)   // already at that end — don't run into the stop
+            // A HOLD (dead-man) press must ALWAYS energize the requested direction. These are switch-mode motors
+            // with no encoder, so the tracked position is approximate and can read "at the limit" when it isn't
+            // (e.g. pos=0 right after commissioning). The distance guard therefore only applies to AUTO taps;
+            // for a hold the safety is the dead-man watchdog + physical limit switch + travel timer.
+            if (!hold && distance < 0.02)   // AUTO tap already at that end — don't run into the stop
             {
                 _driving[key] = "";
                 await AllOff();
-                if (!hold) return;   // a tap at the limit is a no-op; a hold falls through to arm its watchdog
+                return;
             }
             else
             {
+                // Opposite output off, then target on (never both on at once). No delay between them:
+                // a delay opens a re-entrancy window where rapid hold-heartbeats race and corrupt the state.
                 foreach (var m in ms)
                 {
-                    await SetOutput(m.Topic, up ? m.DownOut : m.UpOut, false);
-                    await SetOutput(m.Topic, up ? m.UpOut : m.DownOut, true);
+                    await SetOutput(m, up ? m.DownOut : m.UpOut, false);
+                    await SetOutput(m, up ? m.UpOut : m.DownOut, true);
                 }
                 _driving[key] = action;
                 _moveStartT[key] = DateTime.UtcNow;
                 _moveStartPos[key] = pos;
 
-                // auto-stop exactly when it should reach the limit (position-aware, not a blind full cycle)
+                // auto-stop backstop. AUTO: position-aware (stop when it should reach the limit). HOLD: full
+                // travel time — the dead-man watchdog does the real stopping; this only backstops a stuck ping
+                // stream, and must not cut a hold early when the tracked position is stale.
                 var cts = new CancellationTokenSource();
                 _autoStop[key] = cts;
-                var runFor = remaining;
+                var runFor = hold ? travel : remaining;
                 _ = Task.Run(async () =>
                 {
                     try { await Task.Delay(TimeSpan.FromSeconds(runFor), cts.Token); }
@@ -476,7 +484,7 @@ public sealed class ShellyMqttService : IDisposable
         double delay = ms.Max(m => Math.Clamp(m.StartDelaySec, 0.0, 5.0));
         double moveTime = Math.Max(0.1, travel - delay);
 
-        async Task AllOff() { foreach (var m in ms) { await SetOutput(m.Topic, m.UpOut, false); await SetOutput(m.Topic, m.DownOut, false); } }
+        async Task AllOff() { foreach (var m in ms) { await SetOutput(m, m.UpOut, false); await SetOutput(m, m.DownOut, false); } }
 
         // freeze current position from any in-progress move, and cancel any pending timers
         _pos[key] = CurrentPos(key, travel, delay);
@@ -497,8 +505,8 @@ public sealed class ShellyMqttService : IDisposable
 
         foreach (var m in ms)
         {
-            await SetOutput(m.Topic, up ? m.DownOut : m.UpOut, false);
-            await SetOutput(m.Topic, up ? m.UpOut : m.DownOut, true);
+            await SetOutput(m, up ? m.DownOut : m.UpOut, false);
+            await SetOutput(m, up ? m.UpOut : m.DownOut, true);
         }
         _driving[key] = up ? "up" : "down";
         _moveStartT[key] = DateTime.UtcNow;
