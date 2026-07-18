@@ -313,7 +313,7 @@
 </div>
 <script>
 var S = {
-  screen:'home', navLights:false, anchorLight:false, electronics:true, transfer:false,
+  screen:(function(){try{var s=new URLSearchParams(location.search).get('screen');return s||'home';}catch(e){return 'home';}})(), navLights:false, anchorLight:false, electronics:true, transfer:false,
   lightPos:{navGreen:[1.5,56],navRed:[1.5,64],navStern:[98,52],anchor:[26,2]},
   zones:{courtesy:false,pfcabin:false,pfgang:false,pmcabin:false,galley:false,salon:false,sfcabin:false,sacabin:false},
   shades:{port:0,stbd:0,front:100,aft:50},
