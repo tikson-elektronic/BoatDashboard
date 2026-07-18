@@ -291,7 +291,7 @@
         <div style="display:flex;align-items:baseline;gap:12px;">
           <div class="cond" style="font-weight:600;font-size:24px;letter-spacing:10px;background:linear-gradient(180deg,#f4f9fb,#9fb4be);-webkit-background-clip:text;background-clip:text;color:transparent;">LAGOON</div>
         </div>
-        <div class="cond" style="font-weight:500;font-size:13px;letter-spacing:4px;color:#54687a;">630 MOTOR YACHT · VESSEL MONITOR · BUILD 1824</div>
+        <div class="cond" style="font-weight:500;font-size:13px;letter-spacing:4px;color:#54687a;">630 MOTOR YACHT · VESSEL MONITOR · BUILD 1825</div>
       </div>
     </div>
     <div style="flex:1;"></div>
@@ -1479,6 +1479,7 @@ av: function(){
   var ampFooter='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;max-width:1120px;">'
     +'<div onclick="ampLinkAll()" style="height:34px;padding:0 16px;display:flex;align-items:center;border-radius:17px;font-size:10px;font-weight:700;letter-spacing:1px;cursor:pointer;background:linear-gradient(180deg,#26343f,#1a242d);border:1px solid rgba(255,255,255,0.08);color:#9fb4be;">LINK ALL → SALON</div>'
     +'<div onclick="ampUnlinkAll()" style="height:34px;padding:0 16px;display:flex;align-items:center;border-radius:17px;font-size:10px;font-weight:700;letter-spacing:1px;cursor:pointer;background:linear-gradient(180deg,#26343f,#1a242d);border:1px solid rgba(255,255,255,0.08);color:#9fb4be;">UNLINK ALL</div>'
+    +'<div onclick="ampReleaseAll()" title="Ungroup every zone and stop playback so guests can take over from their phones (AirPlay / Sonos app)" style="height:34px;padding:0 16px;display:flex;align-items:center;border-radius:17px;font-size:10px;font-weight:700;letter-spacing:1px;cursor:pointer;background:linear-gradient(180deg,#1d3a41,#16333a);border:1px solid rgba(47,196,209,0.45);color:#2fc4d1;">RELEASE ALL · FREE FOR GUESTS</div>'
     +'<div onclick="tvToAmp(false)" style="height:34px;padding:0 16px;display:flex;align-items:center;border-radius:17px;font-size:10px;font-weight:700;letter-spacing:1px;cursor:pointer;background:linear-gradient(180deg,#26343f,#1a242d);border:1px solid rgba(255,255,255,0.08);color:#9fb4be;">SALON TV → SALON</div>'
     +'<div onclick="tvToAmp(true)" style="height:34px;padding:0 16px;display:flex;align-items:center;border-radius:17px;font-size:10px;font-weight:700;letter-spacing:1px;cursor:pointer;background:linear-gradient(180deg,#26343f,#1a242d);border:1px solid rgba(255,255,255,0.08);color:#9fb4be;">SALON TV → SALON + MAINDECK</div>'
   +'</div>';
@@ -2211,6 +2212,8 @@ function spotifyPanel(i){
   +'</div>';
 }
 function ampUnlinkAll(){SONOS_ZONES.forEach(function(z){avCtrl(z[1],'unjoin','');});S.av.ampLinked=false;render();setTimeout(pollSonosNow,2000);setTimeout(pollSonosNow,5000);}
+// RELEASE ALL: ungroup every zone + stop playback so each amp is standalone and free for a guest's phone.
+function ampReleaseAll(){SONOS_ZONES.forEach(function(z,i){avCtrl(z[1],'unjoin','');avCtrl(z[1],'stop','');var st=_az(i);st.playing=false;});S.av.ampLinked=false;render();setTimeout(pollSonosNow,2500);setTimeout(pollSonosNow,5000);}
 function knobDrag(ev){
   ev.preventDefault();
   var startY=ev.clientY, startV=S.av.ampVol, el=ev.currentTarget, moved=false;
