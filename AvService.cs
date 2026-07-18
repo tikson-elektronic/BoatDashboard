@@ -35,6 +35,9 @@ public sealed class AvDevice
     public string? SamsungAppName { get; set; }      // the name shown in the TV's Allow prompt / device list
     public string? Mac { get; set; }                 // hardware MAC, for Wake-on-LAN power-on
     public bool Online => (DateTime.UtcNow - LastSeen).TotalSeconds < 150;   // watched: 3 missed scans
+    public bool? PowerOn { get; set; }               // live power state (Samsung REST poll); null = unknown
+    public DateTime? PowerOnAt { get; set; }         // when PowerOn last flipped to true (boot detection)
+    public DateTime? PowerOffAt { get; set; }        // when it flipped false — distinguishes blips from real boots
 }
 
 /// <summary>
@@ -78,6 +81,29 @@ public sealed class AvService
         catch { }
     }
 
+    /// <summary>
+    /// Self-heals Samsung pairing across DHCP IP changes. A Tizen auth token is bound to the controller
+    /// NAME, not the TV's address — so a token saved at an old IP still authorises the TV at its new one.
+    /// If this id has no token but another "*:samsung" entry does, carry that token (and its pinned name
+    /// and MAC) forward to the current id so control stays silent instead of re-triggering the TV's Allow
+    /// prompt. This is what lets the app follow the TV when its address changes, with no re-pairing.
+    /// </summary>
+    internal static string? InheritSamsungToken(string id)
+    {
+        var t = GetToken(id);
+        if (t is not null) return t;
+        var prior = _tokens.Keys.FirstOrDefault(k => !string.Equals(k, id, StringComparison.OrdinalIgnoreCase)
+                                                     && k.EndsWith(":samsung", StringComparison.OrdinalIgnoreCase));
+        if (prior is null) return null;
+        t = GetToken(prior);
+        if (t is null) return null;
+        SaveToken(id, t);
+        if (SamsungNames().TryGetValue(prior, out var nm) && !string.IsNullOrEmpty(nm)) PinSamsungName(id, nm);
+        if (GetMac(prior) is { } m && GetMac(id) is null) SaveMac(id, m);
+        Ip2slClient.Log($"[samsung] migrated pairing {prior} -> {id} (TV changed address)");
+        return t;
+    }
+
     // Samsung ties its auth token to the CONTROLLER NAME we present. We pin the name that actually
     // paired (alongside the token) so every later connect reuses it; until paired we mint a fresh name
     // each run so a stale/denied TV entry can't silently block us.
@@ -99,8 +125,10 @@ public sealed class AvService
     {
         var map = SamsungNames();
         if (map.TryGetValue(id, out var pinned) && !string.IsNullOrEmpty(pinned)) return pinned;
-        // Not yet paired on this TV → fresh name forces a clean Allow prompt. Persisted only on success.
-        return "Lagoon630-" + Guid.NewGuid().ToString("N").Substring(0, 4).ToUpperInvariant();
+        // Not yet paired → a FRESH name forces a clean Allow prompt. A reused name the TV has seen before
+        // can be "poisoned" (Tizen refuses it with ms.channel.timeOut and NEVER prompts). Once the pair
+        // succeeds the name is pinned (above) and reused forever — random is only for the first prompt.
+        return "Lagoon630-" + Guid.NewGuid().ToString("N")[..4].ToUpperInvariant();
     }
     internal static void SaveToken(string id, string token)
     {
@@ -200,6 +228,9 @@ public sealed class AvService
 
     private async Task ScanLoopAsync(CancellationToken ct)
     {
+        // PowerPollLoopAsync DISABLED: probing :8002 (the control port) every 2.5s was knocking the single-session
+        // TV control socket offline — which broke TV key reliability. The power button falls back to local state.
+        // _ = PowerPollLoopAsync(ct);
         // First sweep shortly after startup, then re-scan periodically.
         try { await Task.Delay(3000, ct); } catch { return; }
         while (!ct.IsCancellationRequested)
@@ -207,6 +238,47 @@ public sealed class AvService
             try { await DiscoverAsync(); }
             catch (Exception ex) { Ip2slClient.Log("[av] scan error: " + ex.Message); }
             try { await Task.Delay(TimeSpan.FromSeconds(45), ct); } catch { break; }
+        }
+    }
+
+    /// <summary>Fired when any device's live power state changes (UI syncs its power buttons from this).</summary>
+    public event Action? OnPowerChanged;
+
+    // Polls each Samsung TV's REST endpoint (http://ip:8001/api/v2/ → device.PowerState) every 5s so the
+    // dashboard's power button reflects the REAL state — on, off, or unknown — instead of a local guess.
+    // A TV that's unreachable (off/unplugged) reads as PowerOn=false via a fast 2s timeout.
+    private async Task PowerPollLoopAsync(CancellationToken ct)
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+        while (!ct.IsCancellationRequested)
+        {
+            List<AvDevice> tvs;
+            lock (_lock) tvs = _devices.Values.Where(d => d.Protocol == "samsung").ToList();
+            bool changed = false;
+            foreach (var d in tvs)
+            {
+                // The :8001 REST PowerState is flaky on this TV (drops out while the TV is on), which made the
+                // power button flap and falsely trip the boot gate. The :8002 control port is the reliable signal:
+                // open = the TV is on/reachable, closed = off.
+                bool on = await TvReachableAsync(d.Ip, 8002, 1200);
+                if (d.PowerOn != on)
+                {
+                    if (on == false) d.PowerOffAt = DateTime.UtcNow;
+                    if (on == true)
+                    {
+                        // Only a REAL boot starts the 35s command gate: the TV must have read "off" for a
+                        // while (a genuine power-off takes >20s to matter — Tizen keeps auth loaded through
+                        // short gaps). A brief unreachable blip (router hiccup, Wi-Fi drop, app restart)
+                        // must NOT freeze controls — that made buttons randomly dead after network noise.
+                        bool realBoot = d.PowerOn == false && d.PowerOffAt is { } off
+                                        && (DateTime.UtcNow - off).TotalSeconds > 20;
+                        d.PowerOnAt = realBoot ? DateTime.UtcNow : DateTime.UtcNow.AddSeconds(-120);
+                    }
+                    d.PowerOn = on; changed = true;
+                }
+            }
+            if (changed) { try { OnPowerChanged?.Invoke(); } catch { } }
+            try { await Task.Delay(2500, ct); } catch { break; }
         }
     }
 
@@ -420,7 +492,7 @@ public sealed class AvService
             Protocol = protocol,
             Type = ClassifyType(dtype, manu, model),
             NeedsPairing = needsPairing,
-            ClientKey = GetToken(discId),   // stay paired: reuse the saved token so no TV prompt on control
+            ClientKey = protocol == "samsung" ? InheritSamsungToken(discId) : GetToken(discId),   // stay paired across IP changes
             Mac = GetMac(discId),           // keep the MAC so Wake-on-LAN works even with the TV off
         };
 
@@ -432,8 +504,11 @@ public sealed class AvService
             var ctrl = svc.Element(ns + "controlURL")?.Value ?? "";
             if (ctrl.Length == 0) continue;
             var abs = new Uri(baseUri, ctrl).ToString();
-            if (type.Contains("AVTransport")) dev2.AvTransportUrl = abs;
-            else if (type.Contains("RenderingControl")) dev2.RenderingControlUrl = abs;
+            // Match the exact service token (with surrounding colons) so Sonos's GroupRenderingControl
+            // — which also contains the substring "RenderingControl" and appears later in the XML —
+            // does NOT clobber the real RenderingControl URL (SetVolume/SetMute live only on the latter).
+            if (type.Contains(":AVTransport:")) dev2.AvTransportUrl = abs;
+            else if (type.Contains(":RenderingControl:")) dev2.RenderingControlUrl = abs;
         }
 
         if (isRenderer || dev2.AvTransportUrl is not null || dev2.RenderingControlUrl is not null || protocol != "upnp")
@@ -489,6 +564,31 @@ public sealed class AvService
         return "media";
     }
 
+    /// <summary>
+    /// Builds a minimal device from an "IP:protocol" id (e.g. "192.168.20.119:sonos") so control works
+    /// before discovery has run. Sonos control endpoints are fixed per the standard Sonos device layout;
+    /// brand handlers (samsung/roku/lg/…) drive off the IP directly. Saved pairing token/MAC are reused.
+    /// </summary>
+    private AvDevice? FromId(string id)
+    {
+        var i = id.LastIndexOf(':');
+        if (i <= 0) return null;
+        var ip = id[..i];
+        var proto = id[(i + 1)..];
+        if (proto.Length == 0 || !IPAddress.TryParse(ip, out _)) return null;
+        var d = new AvDevice
+        {
+            Id = id, Ip = ip, Protocol = proto, Name = ip,
+            ClientKey = proto == "samsung" ? InheritSamsungToken(id) : GetToken(id), Mac = GetMac(id),
+        };
+        if (proto is "sonos")
+        {
+            d.AvTransportUrl = $"http://{ip}:1400/MediaRenderer/AVTransport/Control";
+            d.RenderingControlUrl = $"http://{ip}:1400/MediaRenderer/RenderingControl/Control";
+        }
+        return d;
+    }
+
     /// <summary>Executes an action against a device. Returns a short status string.</summary>
     public async Task<string> ControlAsync(string id, string action, string? value)
     {
@@ -496,7 +596,9 @@ public sealed class AvService
         // the LAN and WebView control paths pass raw user input, so resolve it here centrally.
         if (!_devices.TryGetValue(id, out var d))
         {
-            d = Match(id);
+            // Self-healing: if discovery hasn't populated this device yet, build it straight from the
+            // "IP:protocol" id so control works immediately — no scan required, no dependency on state.
+            d = Match(id) ?? FromId(id);
             if (d is null) return $"No AV device matching '{id}'.";
         }
         try
@@ -543,11 +645,179 @@ public sealed class AvService
         return resp.IsSuccessStatusCode ? $"Roku {key} sent." : $"Roku {key} failed ({(int)resp.StatusCode}).";
     }
 
+    /// <summary>Reads a Sonos speaker's zone UID (RINCON_…) from its device description, for grouping.</summary>
+    private static async Task<string?> GetSonosUidAsync(string ip)
+    {
+        try
+        {
+            var xml = await Http.GetStringAsync($"http://{ip}:1400/xml/device_description.xml");
+            var m = System.Text.RegularExpressions.Regex.Match(xml, @"<UDN>uuid:(RINCON_[A-Fa-f0-9]+)</UDN>");
+            return m.Success ? m.Groups[1].Value : null;
+        }
+        catch { return null; }
+    }
+
+    private static string XmlEsc(string s) =>
+        s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;").Replace("'", "&apos;");
+
+    private static string XmlUnesc(string s) =>
+        s.Replace("&lt;", "<").Replace("&gt;", ">").Replace("&quot;", "\"").Replace("&apos;", "'").Replace("&amp;", "&");
+
+    /// <summary>Browses a Sonos speaker's "My Sonos" favorites (FV:2) and returns each one's
+    /// (title, playback URI, playback metadata). The metadata is left in the exact escaped form Sonos
+    /// hands back, so it can be dropped straight into a SetAVTransportURI body — this is what makes a
+    /// linked Spotify playlist actually play.</summary>
+    private static async Task<List<(string title, string uri, string meta)>?> SonosFavoritesRawAsync(string ip)
+    {
+        try
+        {
+            var url = $"http://{ip}:1400/MediaServer/ContentDirectory/Control";
+            var body = await SoapRawAsync(url, "ContentDirectory", "Browse",
+                "<ObjectID>FV:2</ObjectID><BrowseFlag>BrowseDirectChildren</BrowseFlag><Filter>*</Filter>" +
+                "<StartingIndex>0</StartingIndex><RequestedCount>100</RequestedCount><SortCriteria></SortCriteria>");
+            if (body is null) return null;
+            var rm = System.Text.RegularExpressions.Regex.Match(body, @"<Result>(.*?)</Result>",
+                System.Text.RegularExpressions.RegexOptions.Singleline);
+            if (!rm.Success) return null;
+            var didl = XmlUnesc(rm.Groups[1].Value);   // outer-decode once → DIDL with <item>… blocks
+            var list = new List<(string, string, string)>();
+            foreach (System.Text.RegularExpressions.Match im in System.Text.RegularExpressions.Regex.Matches(
+                didl, @"<(?:item|container)\b.*?</(?:item|container)>", System.Text.RegularExpressions.RegexOptions.Singleline))
+            {
+                var block = im.Value;
+                var title = System.Text.RegularExpressions.Regex.Match(block, @"<dc:title>(.*?)</dc:title>",
+                    System.Text.RegularExpressions.RegexOptions.Singleline).Groups[1].Value;
+                var res = System.Text.RegularExpressions.Regex.Match(block, @"<res[^>]*>(.*?)</res>",
+                    System.Text.RegularExpressions.RegexOptions.Singleline).Groups[1].Value;
+                // r:resMD holds the (still-escaped) DIDL to pass back as CurrentURIMetaData verbatim.
+                var meta = System.Text.RegularExpressions.Regex.Match(block, @"<r:resMD>(.*?)</r:resMD>",
+                    System.Text.RegularExpressions.RegexOptions.Singleline).Groups[1].Value;
+                if (!string.IsNullOrEmpty(res))
+                    list.Add((XmlUnesc(title), XmlUnesc(res), meta));
+            }
+            return list;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>JSON list of Sonos favorites for the dashboard picker: [{"i":0,"title":"…"},…].</summary>
+    public async Task<string> SonosFavoritesJsonAsync(string ip)
+    {
+        var favs = await SonosFavoritesRawAsync(ip);
+        if (favs is null) return "[]";
+        var items = favs.Select((f, i) => new { i, title = f.title });
+        return JsonSerializer.Serialize(items);
+    }
+
+    private static string Rx1(string s, string pattern)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(s, pattern,
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+        return m.Success ? m.Groups[1].Value : "";
+    }
+
+    /// <summary>What a Sonos amp is ACTUALLY playing right now, whoever started it (dashboard, a guest's
+    /// Spotify Connect, or an AirPlay from someone's phone). Reads the amp's live transport over UPnP and
+    /// classifies the source from the current URI. Returns {source,playing,title,artist}. This is what makes
+    /// each amp card honest when independent people drive their own amp from their own device.</summary>
+    public async Task<string> SonosNowPlayingJsonAsync(string ip)
+    {
+        var ctrl = $"http://{ip}:1400/MediaRenderer/AVTransport/Control";
+        string transport = "", uri = "", title = "", artist = "", stream = "";
+        var ti = await SoapRawAsync(ctrl, "AVTransport", "GetTransportInfo", "<InstanceID>0</InstanceID>");
+        if (ti is not null) transport = Rx1(ti, "<CurrentTransportState>(.*?)</CurrentTransportState>");
+        var mi = await SoapRawAsync(ctrl, "AVTransport", "GetMediaInfo", "<InstanceID>0</InstanceID>");
+        if (mi is not null) uri = System.Net.WebUtility.HtmlDecode(Rx1(mi, "<CurrentURI>(.*?)</CurrentURI>"));
+        var pi = await SoapRawAsync(ctrl, "AVTransport", "GetPositionInfo", "<InstanceID>0</InstanceID>");
+        if (pi is not null)
+        {
+            var md = System.Net.WebUtility.HtmlDecode(Rx1(pi, "<TrackMetaData>(.*?)</TrackMetaData>"));
+            title = System.Net.WebUtility.HtmlDecode(Rx1(md, "<dc:title>(.*?)</dc:title>"));
+            artist = System.Net.WebUtility.HtmlDecode(Rx1(md, "<dc:creator>(.*?)</dc:creator>"));
+            stream = System.Net.WebUtility.HtmlDecode(Rx1(md, "<r:streamContent>(.*?)</r:streamContent>"));
+        }
+
+        string u = uri.ToLowerInvariant();
+        string source =
+            u.Length == 0 ? "IDLE" :
+            u.StartsWith("x-sonos-htastream:") ? "TV" :
+            u.StartsWith("x-rincon-stream:") ? "LINE" :
+            u.StartsWith("x-rincon:") ? "GROUPED" :
+            u.Contains("airplay") ? "AIRPLAY" :
+            u.Contains("spotify") ? "SPOTIFY" :
+            (u.StartsWith("x-rincon-mp3radio:") || u.StartsWith("x-sonosapi-stream:") || u.StartsWith("hls-radio:") || u.StartsWith("aac:")) ? "RADIO" :
+            u.StartsWith("x-sonos-vli:") ? "STREAM" :
+            "PLAYING";
+
+        bool playing = transport == "PLAYING";
+        if (string.IsNullOrEmpty(title) && !string.IsNullOrEmpty(stream)) title = stream;
+        return JsonSerializer.Serialize(new { source, playing, title, artist });
+    }
+
     // ---- Generic UPnP MediaRenderer (SOAP) ----
     private static async Task<string> UpnpAsync(AvDevice d, string action, string? value)
     {
         switch (action)
         {
+            // Sonos grouping: "join" (value = coordinator IP) makes this speaker play in sync with that
+            // coordinator via x-rincon:<coordUID>; "unjoin"/"unlink" breaks it back out to standalone.
+            case "join":
+            {
+                if (string.IsNullOrWhiteSpace(value)) return "Join: no coordinator specified.";
+                var coordUid = await GetSonosUidAsync(value!);
+                if (coordUid is null) return $"Join: couldn't resolve coordinator {value}.";
+                return await SoapAsync(d.AvTransportUrl, "AVTransport", "SetAVTransportURI",
+                    $"<InstanceID>0</InstanceID><CurrentURI>x-rincon:{coordUid}</CurrentURI><CurrentURIMetaData></CurrentURIMetaData>");
+            }
+            case "unjoin":
+            case "unlink":
+                return await SoapAsync(d.AvTransportUrl, "AVTransport", "BecomeCoordinatorOfStandaloneGroup",
+                    "<InstanceID>0</InstanceID>");
+            // Sonos physical inputs: "tv" = HDMI/optical (home-theater stream), "line" = analog line-in.
+            // Both reference the speaker's own zone UID, then Play to start it.
+            case "source":
+            {
+                var uid = await GetSonosUidAsync(d.Ip);
+                if (uid is null) return "Source: couldn't resolve device UID.";
+                var uri = (value ?? "").ToLowerInvariant() switch
+                {
+                    "tv" or "hdmi" or "optical" => $"x-sonos-htastream:{uid}:spdif",
+                    "line" or "linein" or "aux" => $"x-rincon-stream:{uid}",
+                    _ => null,
+                };
+                if (uri is null) return $"Source: '{value}' not supported (use tv or line).";
+                var setRes = await SoapAsync(d.AvTransportUrl, "AVTransport", "SetAVTransportURI",
+                    $"<InstanceID>0</InstanceID><CurrentURI>{uri}</CurrentURI><CurrentURIMetaData></CurrentURIMetaData>");
+                await SoapAsync(d.AvTransportUrl, "AVTransport", "Play", "<InstanceID>0</InstanceID><Speed>1</Speed>");
+                return setRes;
+            }
+            // Play an internet-radio stream (value = stream URL or host/path). Wrapped as an MP3-radio URI,
+            // set as the transport source, then started. Needs internet; used by the dashboard genre buttons.
+            case "playstream":
+            {
+                if (string.IsNullOrWhiteSpace(value)) return "Play stream: no URL.";
+                var s = value!.Trim();
+                s = System.Text.RegularExpressions.Regex.Replace(s, @"^https?://", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                var uri = "x-rincon-mp3radio://" + XmlEsc(s);
+                var r = await SoapAsync(d.AvTransportUrl, "AVTransport", "SetAVTransportURI",
+                    $"<InstanceID>0</InstanceID><CurrentURI>{uri}</CurrentURI><CurrentURIMetaData></CurrentURIMetaData>");
+                await SoapAsync(d.AvTransportUrl, "AVTransport", "Play", "<InstanceID>0</InstanceID><Speed>1</Speed>");
+                return r;
+            }
+            // Play one of the account's Sonos Favorites (My Sonos) by its list index — this is how a linked
+            // Spotify playlist/station plays: Sonos stores the URI + full metadata, the amp streams it itself
+            // (no Spotify/Sonos app open, no token in this app to expire). value = favorite index.
+            case "playfav":
+            {
+                if (!int.TryParse(value, out var idx)) return "Play favorite: bad index.";
+                var favs = await SonosFavoritesRawAsync(d.Ip);
+                if (favs is null || idx < 0 || idx >= favs.Count) return "Play favorite: not found.";
+                var (_, favUri, favMeta) = favs[idx];
+                var r = await SoapAsync(d.AvTransportUrl, "AVTransport", "SetAVTransportURI",
+                    $"<InstanceID>0</InstanceID><CurrentURI>{XmlEsc(favUri)}</CurrentURI><CurrentURIMetaData>{favMeta}</CurrentURIMetaData>");
+                await SoapAsync(d.AvTransportUrl, "AVTransport", "Play", "<InstanceID>0</InstanceID><Speed>1</Speed>");
+                return r;
+            }
             case "play":
                 return await SoapAsync(d.AvTransportUrl, "AVTransport", "Play",
                     "<InstanceID>0</InstanceID><Speed>1</Speed>");
@@ -627,8 +897,171 @@ public sealed class AvService
     }
 
     // ---- Samsung Tizen (WebSocket remote) ----
+    // Serialize Samsung control: concurrent commands must not each open their own pairing session, or the
+    // TV pops a separate Allow prompt per request. One connection/pairing at a time.
+    private static readonly SemaphoreSlim _samsungGate = new(1, 1);
+
+    // Persistent control socket per TV. THIS TV invalidates its auth token the moment the control socket
+    // closes — so opening a fresh socket per keypress made it re-prompt minutes later. Hold ONE socket
+    // open and send every command over it; a background reader drains frames (capturing token refreshes)
+    // and drops the entry if it closes, so the next command re-establishes it.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (ClientWebSocket ws, CancellationTokenSource cts)> _tvLinks = new();
+
+    /// <summary>Send a key over the already-open socket if we have one. Returns false if there's no live link.</summary>
+    private static async Task<bool> TrySendLiveAsync(string id, string payload)
+    {
+        if (_tvLinks.TryGetValue(id, out var link) && link.ws.State == WebSocketState.Open)
+        {
+            try
+            {
+                using var sc = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+                await link.ws.SendAsync(Encoding.UTF8.GetBytes(payload), WebSocketMessageType.Text, true, sc.Token);
+                return true;
+            }
+            catch { try { link.cts.Cancel(); } catch { } _tvLinks.TryRemove(id, out _); }
+        }
+        return false;
+    }
+
+    /// <summary>Adopt an authorised socket as the persistent link and keep draining it (token refreshes, close).</summary>
+    private static void KeepTvLinkAlive(string id, ClientWebSocket ws)
+    {
+        if (_tvLinks.TryRemove(id, out var old)) { try { old.cts.Cancel(); } catch { } try { old.ws.Dispose(); } catch { } }
+        var cts = new CancellationTokenSource();
+        _tvLinks[id] = (ws, cts);
+        _ = Task.Run(async () =>
+        {
+            var buf = new byte[8192];
+            try
+            {
+                while (!cts.IsCancellationRequested && ws.State == WebSocketState.Open)
+                {
+                    var r = await ws.ReceiveAsync(buf, cts.Token);
+                    if (r.MessageType == WebSocketMessageType.Close) break;
+                    var fr = Encoding.UTF8.GetString(buf, 0, r.Count);
+                    // Persist ONLY a real refreshed persistent token (data.token). Never the rotating
+                    // per-session clients[] id — saving that is exactly what broke persistence.
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(fr);
+                        if (doc.RootElement.TryGetProperty("data", out var dt) && dt.ValueKind == JsonValueKind.Object
+                            && dt.TryGetProperty("token", out var tk) && tk.GetString() is { Length: > 0 } nt)
+                            SaveToken(id, nt);
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            finally { _tvLinks.TryRemove(id, out _); try { ws.Dispose(); } catch { } }
+        });
+    }
+
+    /// <summary>
+    /// Deterministic controller name per TV. The Tizen auth token is bound to this name, so a STABLE name
+    /// means the TV keeps ONE authorization entry — you tap Allow once and every later connect is recognised.
+    /// Random names (the old behaviour) made the TV treat each connect as a brand-new device and re-prompt
+    /// endlessly. Once pinned after a successful pair, that pinned name is reused; this is the seed.
+    /// </summary>
+    private static string SamsungStableName(string id)
+    {
+        using var sha = System.Security.Cryptography.SHA1.Create();
+        var h = sha.ComputeHash(Encoding.UTF8.GetBytes("voms:" + id));
+        return "Lagoon630-" + Convert.ToHexString(h)[..4];
+    }
+
+    /// <summary>Quick TCP probe — is the TV's control port answering? Used to bail fast when it's off.</summary>
+    private static async Task<bool> TvReachableAsync(string ip, int port, int timeoutMs)
+    {
+        try
+        {
+            using var tcp = new TcpClient();
+            using var cts = new CancellationTokenSource(timeoutMs);
+            await tcp.ConnectAsync(ip, port, cts.Token);
+            return tcp.Connected;
+        }
+        catch { return false; }
+    }
+
+    // ================= SmartThings cloud control (PRIMARY when a token is set + cloud reachable) =================
+    // Samsung's official cloud API. Reliable, survives power cycles, can even power the TV on. Set the
+    // Personal Access Token (account.smartthings.com/tokens, scopes r:devices:* x:devices:*) via settings.
+    public static string? SmartThingsToken { get; set; }
+    private static string? _stDeviceId;
+    private static DateTime _stColdUntil = DateTime.MinValue;   // after a cloud failure, skip cloud (use local) until here
+    private static readonly HttpClient _stHttp = new() { Timeout = TimeSpan.FromSeconds(4) };
+
+    private static async Task<string?> StDeviceIdAsync()
+    {
+        if (_stDeviceId is not null) return _stDeviceId;
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, "https://api.smartthings.com/v1/devices");
+            req.Headers.Authorization = new("Bearer", SmartThingsToken);
+            var resp = await _stHttp.SendAsync(req);
+            if (!resp.IsSuccessStatusCode) return null;
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+            foreach (var dev in doc.RootElement.GetProperty("items").EnumerateArray())
+            {
+                var blob = dev.ToString();
+                if (blob.Contains("samsungvd") || blob.Contains("tvChannel") || blob.Contains("\"OCF\"") && blob.Contains("TV"))
+                { _stDeviceId = dev.GetProperty("deviceId").GetString(); Ip2slClient.Log("[smartthings] TV device: " + _stDeviceId); return _stDeviceId; }
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private static async Task<bool> StCmdAsync(string cap, string cmd, object[]? args = null)
+    {
+        var id = await StDeviceIdAsync();
+        if (id is null) return false;
+        try
+        {
+            var body = JsonSerializer.Serialize(new { commands = new[] { new { component = "main", capability = cap, command = cmd, arguments = args ?? Array.Empty<object>() } } });
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"https://api.smartthings.com/v1/devices/{id}/commands");
+            req.Headers.Authorization = new("Bearer", SmartThingsToken);
+            req.Content = new StringContent(body, Encoding.UTF8, "application/json");
+            var resp = await _stHttp.SendAsync(req);
+            return resp.IsSuccessStatusCode;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>Try the action over the SmartThings cloud. Returns true=done, false=cloud failed (offline),
+    /// null=no cloud equivalent OR cloud disabled/cooling-down → caller uses local control.</summary>
+    private static async Task<bool?> TryCloudAsync(string action)
+    {
+        if (string.IsNullOrWhiteSpace(SmartThingsToken)) return null;
+        if (DateTime.UtcNow < _stColdUntil) return null;                 // circuit breaker: offline → skip cloud, go local
+        var st = action.ToLowerInvariant() switch
+        {
+            "power_on" or "on" or "wake" => ("switch", "on", (object[]?)null),
+            "power" or "power_off" or "off" => ("switch", "off", null),
+            "vol_up" or "volume_up" => ("audioVolume", "volumeUp", null),
+            "vol_down" or "volume_down" => ("audioVolume", "volumeDown", null),
+            "mute" => ("audioMute", "mute", null),
+            "unmute" => ("audioMute", "unmute", null),
+            "ch_up" or "channel_up" => ("tvChannel", "channelUp", null),
+            "ch_down" or "channel_down" => ("tvChannel", "channelDown", null),
+            "play" or "playpause" => ("mediaPlayback", "play", null),
+            "pause" => ("mediaPlayback", "pause", null),
+            _ => (null, null, null),
+        };
+        if (st.Item1 is null) return null;                              // nav keys / inputs / apps → local
+        bool ok = await StCmdAsync(st.Item1, st.Item2!, st.Item3);
+        _stColdUntil = ok ? DateTime.MinValue : DateTime.UtcNow.AddSeconds(60);   // on failure, prefer local for 60s
+        return ok;
+    }
+
     private static async Task<string> SamsungAsync(AvDevice d, string action)
     {
+        // CLOUD FIRST (SmartThings): reliable, survives power cycles, can wake the TV over the internet.
+        // Returns true = done via cloud; false = cloud unreachable (offline) → fall through to LOCAL below;
+        // null = no cloud equivalent (nav keys / inputs / apps) → also LOCAL. This is the hybrid the owner
+        // asked for: cloud when online, local when there's no internet.
+        var cloud = await TryCloudAsync(action);
+        if (cloud == true) return $"Samsung {action} sent (cloud).";
+
         var keys = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             // power / volume
@@ -665,10 +1098,28 @@ public sealed class AvService
         if (action is "power_on" or "wake" or "on")
         {
             var mac = d.Mac ?? GetMac(d.Id) ?? ArpLookup(d.Ip);   // saved MAC, else last-known ARP (only if TV replied recently)
-            return WakeOnLan(mac, d.Ip)
-                ? "Samsung: Wake-on-LAN sent — the TV should power on (needs the TV's network-standby setting ON to work)."
+            // Wired WoL only. NO KEY_POWER fallback — with the power poll disabled we don't know the real state,
+            // so a KEY_POWER "wake" would TOGGLE an already-on TV OFF. WoL can only ever turn a TV on.
+            bool ok = WakeOnLan(mac, d.Ip);
+            if (ok) { for (int w = 0; w < 4; w++) { await Task.Delay(350); WakeOnLan(mac, d.Ip); } }
+            return ok
+                ? "Samsung: Wake-on-LAN sent (wired) — the TV should power on."
                 : "Samsung: no MAC known for Wake-on-LAN. Re-add the TV while it's on so I can read its MAC.";
         }
+
+        // Fast reachability gate: an off/asleep TV's control port won't answer — bail in ~1.5s instead of
+        // grinding through WebSocket retries or a 100s HTTP timeout. Mashing controls on an off TV was what
+        // choked the whole app and took the amps/lights down with it. Wake it with power (WoL) first.
+        if (!await TvReachableAsync(d.Ip, 8002, 1500))
+            return "Samsung: TV isn't responding (off/asleep). Press power to wake it first.";
+
+        // BOOT WINDOW gate — do not open the control WebSocket for ~35s after the TV powers on. During
+        // early boot Tizen hasn't loaded its authorization DB, so ANY connect — even with a valid token —
+        // makes the TV pop an Allow prompt. No connection here = no prompt, ever. (PowerOnAt is stamped
+        // by the 2.5s REST power poll on the discovery-tracked device instance ControlAsync resolved.)
+        if (action is not "power" and not "power_on" and not "power_off"
+            && d.PowerOnAt is { } bootAt && (DateTime.UtcNow - bootAt).TotalSeconds < 35)
+            return "Samsung: TV is starting up — controls unlock in a few seconds.";
 
         // App launch (Netflix, YouTube, …). The REST launch endpoint works on this TV (POST returns 200);
         // it just needs the CORRECT per-TV app IDs — several stock IDs 404. IDs below were verified live
@@ -698,12 +1149,27 @@ public sealed class AvService
         // Remote keypress payload for the WebSocket control channel.
         string Payload() => JsonSerializer.Serialize(new { method = "ms.remote.control", @params = new { Cmd = "Click", DataOfCmd = key, Option = "false", TypeOfRemote = "SendRemoteKey" } });
         string label = key;
+
+        // FAST PATH: if a control socket is already open for this TV, send over it instantly — no reconnect,
+        // no gate, no token re-check. This is what keeps the token alive (the TV kills it on socket close).
+        {
+            string livePayload = JsonSerializer.Serialize(new { method = "ms.remote.control", @params = new { Cmd = "Click", DataOfCmd = key, Option = "false", TypeOfRemote = "SendRemoteKey" } });
+            if (await TrySendLiveAsync(d.Id, livePayload)) return $"Samsung {label} sent.";
+        }
+
         // Use a stable per-device app name. If we've never paired, and one was tried before, the TV may
         // remember it as denied and refuse (ms.channel.timeOut) — so pick a fresh name until paired.
         // The controller name is the pairing identity: the TV stores an auth token AGAINST this name.
         // If a name was authorised before but its token got lost, reconnecting with the same name and no
         // token makes Tizen reject instantly (timeOut/unauthorized) without re-prompting. So when we have
         // NO saved token, present a fresh name to force a clean Allow prompt; once paired, the name is
+        // Serialize from here: only ONE connection/pairing at a time, so concurrent commands can't each
+        // open their own session and make the TV pop a separate Allow prompt per request. Fail fast if a
+        // pairing is already in flight (don't queue up — that re-creates the pile-up).
+        if (!await _samsungGate.WaitAsync(3000))
+            return "Samsung: busy (a pairing is in progress) — try again in a moment.";
+        try
+        {
         // pinned in _samsungNames so the saved token keeps matching it on every later connect.
         d.SamsungAppName ??= SamsungPairName(d.Id, !string.IsNullOrEmpty(d.ClientKey));
         var name = Convert.ToBase64String(Encoding.UTF8.GetBytes(d.SamsungAppName));
@@ -724,13 +1190,14 @@ public sealed class AvService
             {
                 var w = new ClientWebSocket();
                 w.Options.RemoteCertificateValidationCallback = (_, _, _, _) => true;   // TV serves a self-signed cert
-                try { using var c = new CancellationTokenSource(TimeSpan.FromSeconds(15)); await w.ConnectAsync(wssUri, c.Token); return w; }
+                w.Options.KeepAliveInterval = TimeSpan.FromSeconds(20);   // ping frames keep the socket (and token) alive
+                try { using var c = new CancellationTokenSource(TimeSpan.FromSeconds(4)); await w.ConnectAsync(wssUri, c.Token); return w; }
                 catch (Exception cex) { Ip2slClient.Log($"[samsung] wss:8002 attempt {a + 1} failed: {cex.Message}"); try { w.Dispose(); } catch { } }
             }
             return null;
         }
 
-        var wsN = await ConnectSecureAsync(paired ? 3 : 1);
+        var wsN = await ConnectSecureAsync(paired ? 2 : 1);
         if (wsN is null)
         {
             // Paired but the secure channel wouldn't connect → do NOT use legacy (it re-prompts); ask to retry.
@@ -745,7 +1212,7 @@ public sealed class AvService
             ws2.Dispose();
             return $"Samsung {label} sent (legacy).";
         }
-        using var ws = wsN;
+        var ws = wsN;   // NOT `using` — on success we hand this socket to the persistent link, not dispose it
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));   // for the reads/sends below
         Ip2slClient.Log($"[samsung] wss:8002 connected state={ws.State}");
 
@@ -756,32 +1223,68 @@ public sealed class AvService
         // Wait for the TV's connect result and capture any token it issues. Report success ONLY on a real
         // ms.channel.connect — a stored token can be stale (the TV then re-prompts), and we MUST persist the
         // fresh token issued on Allow or every command keeps prompting. `seconds` gives time to tap Allow.
-        async Task<bool> AwaitAuthAsync(ClientWebSocket sock, int seconds)
+        // Returns 1 = authorised (ms.channel.connect), 2 = EXPLICIT refusal (ms.channel.timeOut — the TV
+        // actively rejected the token), 0 = silence/no answer (TV still booting after WoL, transient).
+        // The distinction matters: only an explicit refusal may discard the saved token. Treating boot-time
+        // silence as rejection nuked a perfectly valid token on every cold start → endless Allow prompts.
+        // If the TV shows its Allow prompt (ms.channel.unauthorized) we extend the wait on THIS connection
+        // so the user's tap lands here — reconnecting would close the prompt and pop a new one (double ask).
+        async Task<int> AwaitAuthAsync(ClientWebSocket sock, int seconds)
         {
             var rbuf = new byte[8192];
-            using var rc = new CancellationTokenSource(TimeSpan.FromSeconds(seconds + 2));
+            using var rc = new CancellationTokenSource(TimeSpan.FromSeconds(seconds + 45));
             var dl = DateTime.UtcNow.AddSeconds(seconds);
+            bool extended = false;
             while (DateTime.UtcNow < dl)
             {
                 WebSocketReceiveResult r;
                 try { r = await sock.ReceiveAsync(rbuf, rc.Token); }
-                catch (Exception rex) { Ip2slClient.Log("[samsung] receive ended: " + rex.Message); return false; }
+                catch (Exception rex) { Ip2slClient.Log("[samsung] receive ended: " + rex.Message); return 0; }
                 var fr = Encoding.UTF8.GetString(rbuf, 0, r.Count);
-                Ip2slClient.Log("[samsung] frame: " + (fr.Length > 160 ? fr[..160] : fr));
+                Ip2slClient.Log("[samsung] frame: " + (fr.Length > 400 ? fr[..400] : fr));
                 try
                 {
                     using var doc = JsonDocument.Parse(fr);
                     var root = doc.RootElement;
                     var ev = root.TryGetProperty("event", out var e) ? e.GetString() : "";
-                    if (root.TryGetProperty("data", out var data) && data.TryGetProperty("token", out var tok) && tok.GetString() is { Length: > 0 } t)
-                    { d.ClientKey = t; SaveToken(d.Id, t); PinSamsungName(d.Id, d.SamsungAppName!); }
-                    if (ev == "ms.channel.connect") return true;      // authorised (valid token, or just accepted)
-                    if (ev == "ms.channel.timeOut") return false;     // refused, no prompt
-                    // ms.channel.unauthorized → the Allow prompt is showing; keep waiting for the user to accept.
+                    // The TV issuing a token FOR US is the authorisation signal — and on this TV it arrives in
+                    // a frame WITHOUT event:"ms.channel.connect" (data.clients[].attributes.token), so gating on
+                    // that event dropped a valid token and re-prompted forever. Pre-approval frames carry the
+                    // client with NO token, so token-present is unambiguous once the device list is clean. Save
+                    // it and report authorised. (data.token is the classic first-pair location.)
+                    root.TryGetProperty("data", out var data);
+                    // The PERSISTENT auth token — the one other apps save once and reuse across power cycles —
+                    // arrives in data.token on authorisation. The token echoed inside data.clients[].attributes
+                    // is a per-SESSION id that ROTATES and dies on disconnect; saving THAT (and overwriting the
+                    // real one) is why it re-prompted after every off/on. Save ONLY data.token, never overwrite
+                    // a good token with the session id.
+                    if (data.ValueKind == JsonValueKind.Object && data.TryGetProperty("token", out var tok)
+                        && tok.GetString() is { Length: > 0 } realTok)
+                    {
+                        d.ClientKey = realTok; SaveToken(d.Id, realTok); PinSamsungName(d.Id, d.SamsungAppName!);
+                        Ip2slClient.Log("[samsung] PERSISTENT token saved — paired for good");
+                        return 1;                                     // authorised
+                    }
+                    if (ev == "ms.channel.connect")
+                    {
+                        // Authorised, but this frame carried no data.token (the TV already issued it earlier).
+                        // Bootstrap from the session token ONLY if we have nothing saved yet — so a first pair
+                        // still captures *something* — but NEVER overwrite an existing persistent token.
+                        if (string.IsNullOrEmpty(GetToken(d.Id)) && data.ValueKind == JsonValueKind.Object
+                            && data.TryGetProperty("clients", out var cl) && cl.ValueKind == JsonValueKind.Array)
+                            foreach (var c in cl.EnumerateArray())
+                                if (c.TryGetProperty("attributes", out var at) && at.TryGetProperty("token", out var ct)
+                                    && ct.GetString() is { Length: > 0 } bt)
+                                { d.ClientKey = bt; SaveToken(d.Id, bt); PinSamsungName(d.Id, d.SamsungAppName!); break; }
+                        return 1;                                     // authorised
+                    }
+                    if (ev == "ms.channel.timeOut") return 2;         // ACTIVE refusal — token really is dead
+                    if (ev == "ms.channel.unauthorized" && !extended)
+                    { extended = true; dl = DateTime.UtcNow.AddSeconds(40); Ip2slClient.Log("[samsung] Allow prompt is up — holding this connection for the tap"); }
                 }
                 catch { }
             }
-            return false;
+            return 0;                                                  // silence — TV booting/busy; NOT a refusal
         }
         async Task<bool> SendKeyAsync(ClientWebSocket sock)
         {
@@ -790,34 +1293,64 @@ public sealed class AvService
         }
 
         // Phase 1 — presented a token: give the TV a few seconds to accept it silently.
-        if (paired && await AwaitAuthAsync(ws, 6))
+        if (paired)
         {
-            await SendKeyAsync(ws);
-            try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token); } catch { }
-            return $"Samsung {label} sent (paired).";
+            var auth = await AwaitAuthAsync(ws, 6);
+            if (auth == 1)
+            {
+                await SendKeyAsync(ws);
+                KeepTvLinkAlive(d.Id, ws);   // hold the socket open so the token stays valid for later commands
+                return $"Samsung {label} sent (paired).";
+            }
+            if (auth == 0)
+            {
+                // No answer ≠ rejection: right after Wake-on-LAN, Tizen takes a while before the auth
+                // service responds. KEEP the token and let the caller retry — re-pairing here would throw
+                // away a valid token and re-prompt on every cold boot.
+                try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None); } catch { }
+                ws.Dispose();
+                return "Samsung: the TV is still waking up — try again in a few seconds.";
+            }
+            // auth == 2 → the TV sent ms.channel.timeOut. Within ~90s of boot Tizen answers timeOut even
+            // for VALID tokens (auth service still loading) — only trust it as a real refusal once the TV
+            // has been steadily on. Otherwise keep the token and let the caller retry; re-pairing on a
+            // boot-transient refusal is what kept re-prompting after every power-on.
+            bool steadyOn = d.PowerOn == true && d.PowerOnAt is not null
+                            && (DateTime.UtcNow - d.PowerOnAt.Value).TotalSeconds > 90;
+            if (!steadyOn)
+            {
+                try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None); } catch { }
+                ws.Dispose();
+                return "Samsung: the TV just started — give it a few seconds and try again.";
+            }
+            // Steady-on TV explicitly refused → the token really is dead; fall through to a clean re-pair.
         }
 
         // Phase 2 — no token, or the token was rejected. Do a CLEAN re-pair: drop the stale token, reconnect
         // with a brand-new controller name and NO token so the TV shows a fresh Allow prompt, then capture
         // the new token it issues so all later commands are silent. This is the one-and-only Allow tap.
         try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None); } catch { }
+        ws.Dispose();
         if (paired) { d.ClientKey = null; Ip2slClient.Log("[samsung] stored token rejected — re-pairing"); }
-        d.SamsungAppName = "Lagoon630-" + Guid.NewGuid().ToString("N")[..4].ToUpperInvariant();   // fresh name → clean prompt
+        d.SamsungAppName = "Lagoon630-" + Guid.NewGuid().ToString("N")[..4].ToUpperInvariant();   // FRESH name → un-poisoned clean prompt
         var name2 = Convert.ToBase64String(Encoding.UTF8.GetBytes(d.SamsungAppName));
         var pairWs = new ClientWebSocket();
         pairWs.Options.RemoteCertificateValidationCallback = (_, _, _, _) => true;
+        pairWs.Options.KeepAliveInterval = TimeSpan.FromSeconds(20);
         try { using var pc = new CancellationTokenSource(TimeSpan.FromSeconds(15)); await pairWs.ConnectAsync(new Uri($"wss://{d.Ip}:8002/api/v2/channels/samsung.remote.control?name={name2}"), pc.Token); }
         catch (Exception pex) { pairWs.Dispose(); Ip2slClient.Log("[samsung] pair connect failed: " + pex.Message); return "Samsung: couldn't reach the TV to pair — try again in a moment."; }
-        using var _pairWs = pairWs;
         Ip2slClient.Log("[samsung] pairing with fresh name — waiting for Allow on the TV");
-        if (await AwaitAuthAsync(pairWs, 40))
+        if (await AwaitAuthAsync(pairWs, 40) == 1)
         {
             await SendKeyAsync(pairWs);
-            try { await pairWs.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token); } catch { }
+            KeepTvLinkAlive(d.Id, pairWs);   // keep the freshly-paired socket open so its token survives
             return $"Samsung {label} sent (paired).";
         }
         try { await pairWs.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cts.Token); } catch { }
+        pairWs.Dispose();
         return "Samsung: tap ALLOW on the TV when the prompt appears — after that it stays paired.";
+        }
+        finally { _samsungGate.Release(); }
     }
 
     // ---- LG webOS (SSAP WebSocket) ----
@@ -970,6 +1503,28 @@ public sealed class AvService
         return resp.IsSuccessStatusCode ? $"{action} sent." : $"{action} failed ({(int)resp.StatusCode}).";
     }
 
+    /// <summary>Like SoapAsync but returns the response body (needed for Browse/Get* that carry data),
+    /// or null on failure.</summary>
+    private static async Task<string?> SoapRawAsync(string? controlUrl, string service, string action, string args)
+    {
+        if (string.IsNullOrEmpty(controlUrl)) return null;
+        var svcType = $"urn:schemas-upnp-org:service:{service}:1";
+        var body =
+            "<?xml version=\"1.0\"?><s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" " +
+            "s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\"><s:Body>" +
+            $"<u:{action} xmlns:u=\"{svcType}\">{args}</u:{action}></s:Body></s:Envelope>";
+        using var req = new HttpRequestMessage(HttpMethod.Post, controlUrl)
+        { Content = new StringContent(body, Encoding.UTF8, "text/xml") };
+        req.Headers.Add("SOAPACTION", $"\"{svcType}#{action}\"");
+        try
+        {
+            var resp = await Http.SendAsync(req);
+            if (!resp.IsSuccessStatusCode) return null;
+            return await resp.Content.ReadAsStringAsync();
+        }
+        catch { return null; }
+    }
+
     public string DevicesJson()
     {
         lock (_lock)
@@ -978,6 +1533,8 @@ public sealed class AvService
                 id = d.Id, name = d.Name, ip = d.Ip, type = d.Type,
                 manufacturer = d.Manufacturer, model = d.Model, protocol = d.Protocol,
                 online = d.Online, needsPairing = d.NeedsPairing, accepted = d.Accepted,
+                powerOn = d.PowerOn,
+                booting = d.PowerOnAt is not null && (DateTime.UtcNow - d.PowerOnAt.Value).TotalSeconds < 35,
             }));
     }
 

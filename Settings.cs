@@ -38,6 +38,10 @@ public sealed class AppSettings
     /// Off by default — a tunnel exposes the boat publicly (login-gated). URL is ephemeral.</summary>
     public bool EnableCloudflareTunnel { get; set; } = false;
 
+    /// <summary>SmartThings Personal Access Token (account.smartthings.com/tokens) for cloud TV control —
+    /// the reliable primary path; local WebSocket control is the automatic fallback when offline.</summary>
+    public string SmartThingsToken { get; set; } = "";
+
     /// <summary>NMEA 2000 gateway (YachtDevices/Actisense) TCP address for navigation + engine data.
     /// Empty = no gateway; the navigation/engine pages keep demo/last values.</summary>
     public string NmeaHost { get; set; } = "";
@@ -59,6 +63,44 @@ public sealed class AppSettings
 
     /// <summary>Cameras / NVR streams (Blue Iris, RTSP, MJPEG) shown on the dashboard.</summary>
     public List<CameraDef> Cameras { get; set; } = new();
+
+    /// <summary>Shelly relays that drive up/down motors (TV lift, shades), controlled over MQTT. Each motor
+    /// maps a dashboard control to a Shelly's MQTT topic + which output is up and which is down.</summary>
+    public List<ShellyMotor> ShellyMotors { get; set; } = new();
+
+    /// <summary>Embedded MQTT broker (the dashboard hosts it; Shelly devices connect to this PC). Credentials
+    /// the Shellys authenticate with — set them on each Shelly's MQTT config too. Empty = allow anonymous.</summary>
+    public int MqttBrokerPort { get; set; } = 1883;
+    public string MqttBrokerUser { get; set; } = "boat";
+    public string MqttBrokerPass { get; set; } = "";
+
+    /// <summary>Seconds a shade/motor Shelly may be offline (off the broker) before the dashboard alarms.</summary>
+    public int ShadeOfflineAlarmSec { get; set; } = 60;
+
+    /// <summary>Spotify Web API (Authorization Code + PKCE) for full Spotify control of the Sonos amps.
+    /// ClientId from developer.spotify.com (one-time); RefreshToken is filled by the in-app Connect flow.</summary>
+    public string SpotifyClientId { get; set; } = "";
+    public string SpotifyRefreshToken { get; set; } = "";
+
+    /// <summary>Scenes (named presets) as an opaque JSON array maintained by the dashboard UI:
+    /// [{"id","name","actions":[{"t":"amp|tv|shade|light|lift",...}]}]. Executed in the helm WebView so all
+    /// the existing control functions (and live light state) are reused. C# just stores and serves this blob;
+    /// automations run a scene by id via the existing AutomationService firing a "scene" action.</summary>
+    public string ScenesJson { get; set; } = "[]";
+}
+
+/// <summary>A Shelly-controlled up/down motor (TV lift or a shade), driven over MQTT. Two relay outputs:
+/// one raises the motor, one lowers it.</summary>
+public sealed class ShellyMotor
+{
+    public string Key { get; set; } = "";      // stable slot id: "tvlift","shadePort","shadeStbd","shadeFront","shadeAft"
+    public string Name { get; set; } = "";      // display label
+    public string Topic { get; set; } = "";     // the Shelly's MQTT topic prefix (its device id, e.g. shelly2pmg4-abc123)
+    public int UpOut { get; set; } = 0;          // output that raises: 0 = O1 (switch:0), 1 = O2 (switch:1)
+    public int DownOut { get; set; } = 1;        // output that lowers
+    public int TravelSec { get; set; } = 20;     // full-travel time (auto-stop after this, so a relay is never left latched)
+    public double StartDelaySec { get; set; } = 0.5;  // dead-time from relay-on until the shade actually starts moving
+    public string Ip { get; set; } = "";         // device IP (for pushing firmware config like the auto-off backstop)
 }
 
 public sealed class CameraDef

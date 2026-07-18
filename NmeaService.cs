@@ -30,6 +30,7 @@ public sealed class NmeaService : IDisposable
         public double? WindSpeed;         // knots (apparent)
         public double? WindAngle;         // ° relative to bow
         public double? WaterSpeed;        // knots (through water)
+        public double? Rudder;            // ° rudder angle (+ starboard / - port)
         public int? Satellites;
         public double? Hdop;
         public int? FixQuality;           // 0 = no fix, 1 = GPS, 2 = DGPS

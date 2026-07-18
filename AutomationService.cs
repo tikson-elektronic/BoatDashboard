@@ -146,6 +146,22 @@ public sealed class AutomationService
     public bool Enable(string id, bool on) { lock (_lock) { var r = _rules.FirstOrDefault(x => x.Id == id); if (r is null) return false; r.Enabled = on; Save(); return true; } }
     public string ListJson() { lock (_lock) return JsonSerializer.Serialize(_rules); }
 
+    /// <summary>Replace the whole rule set (the dashboard UI owns the list and saves it wholesale).</summary>
+    public void SetAllJson(string json)
+    {
+        List<Automation>? next;
+        try { next = JsonSerializer.Deserialize<List<Automation>>(json); } catch { return; }
+        if (next is null) return;
+        lock (_lock)
+        {
+            // preserve edge-trigger state for rules that still exist, so a save doesn't re-fire a met condition
+            var prev = _rules.ToDictionary(r => r.Id, r => r.LastConditionMet);
+            foreach (var r in next) if (prev.TryGetValue(r.Id, out var m)) r.LastConditionMet = m;
+            _rules = next;
+            Save();
+        }
+    }
+
     private void Load()
     {
         try { if (File.Exists(Path_)) _rules = JsonSerializer.Deserialize<List<Automation>>(File.ReadAllText(Path_)) ?? new(); }

@@ -35,6 +35,23 @@ public sealed class LocalServer : IDisposable
     /// <summary>iTach client, for the /api/raw debug dump (reads cached frames only).</summary>
     public Ip2slClient? Itach;
 
+    /// <summary>Shelly motor control (TV lift, shades) over the embedded MQTT broker.</summary>
+    public ShellyMqttService? Shelly;
+    /// <summary>Persists a saved Shelly motor config (to settings.json). Set by ShellWindow.</summary>
+    public Action<List<ShellyMotor>>? OnShellyConfig;
+
+    /// <summary>Full Spotify control of the Sonos amps (Web API).</summary>
+    public SpotifyService? Spotify;
+    /// <summary>Persists the Spotify Client ID (to settings.json). Set by ShellWindow.</summary>
+    public Action<string>? OnSpotifyClientId;
+
+    /// <summary>Scenes + automations: read current (opaque JSON) and persist edits. Set by ShellWindow.</summary>
+    public Func<string>? GetScenesJson;
+    public Action<string>? OnScenesSave;
+    public Action<string>? OnRunScene;           // run a scene by id (in the helm WebView)
+    public Func<string>? GetAutomationsJson;
+    public Action<string>? OnAutomationsSave;
+
     /// <summary>Configured cameras (name + feed URL). Served via /api/cameras and proxied via /api/cam.</summary>
     public IReadOnlyList<CameraDef>? Cameras;
     private static readonly HttpClient CamHttp = new() { Timeout = TimeSpan.FromSeconds(8) };
@@ -82,10 +99,12 @@ public sealed class LocalServer : IDisposable
     window.__remote=true;
     window.chrome={webview:{postMessage:function(o){try{fetch('/api/cmd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(o)});}catch(e){}}}};
   }
-  window.vomsApply=function(d){try{if(!window.LIVE)return;(function m(t,s){for(var k in s){var v=s[k];if(v&&typeof v==='object'&&!Array.isArray(v)&&t[k]&&typeof t[k]==='object')m(t[k],v);else t[k]=v;}})(window.LIVE,d);if('alarm' in d&&typeof S!=='undefined')S.alarm=!!d.alarm;if(window.render)render();}catch(e){}};
+  window.vomsApply=function(d){try{if(!window.LIVE)return;(function m(t,s){for(var k in s){var v=s[k];if(v&&typeof v==='object'&&!Array.isArray(v)&&t[k]&&typeof t[k]==='object')m(t[k],v);else t[k]=v;}})(window.LIVE,d);if('alarm' in d&&typeof S!=='undefined')S.alarm=!!d.alarm;if(d.navStatus&&typeof S!=='undefined'){S.anchorLight=!!d.navStatus.anchor;S.navLights=!!d.navStatus.running;S.electronics=!!d.navStatus.electronics;}if(window.render)render();}catch(e){}};
   window.addEventListener('DOMContentLoaded',function(){
     if(typeof window.setAllZones==='function'){var _s=window.setAllZones;window.setAllZones=function(v){if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage({cmd:v?'all_on':'all_off'});return _s(v);};}
-    setInterval(function(){fetch('/api/telemetry').then(function(r){return r.json();}).then(function(d){window.vomsApply(d);}).catch(function(){});},2000);
+    setInterval(function(){fetch('/api/telemetry').then(function(r){return r.json();}).then(function(d){window.vomsApply(d);}).catch(function(){});},1500);
+    // Poll the TVs' real power state so the remote's power button + control gating reflect reality.
+    setInterval(function(){fetch('/api/av/devices').then(function(r){return r.json();}).then(function(d){if(window.avDevices)window.avDevices(d);}).catch(function(){});},3000);
   });
 })();</script>";
 
@@ -309,6 +328,17 @@ public sealed class LocalServer : IDisposable
                     await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes(RawDumpJson(Itach)));
                     return;
                 }
+                // Raw-bus byte capture for reverse-engineering command codes. ?clear=1 empties the ring first
+                // (call it, press a physical button, then call again to see exactly what crossed the wire).
+                if (path.StartsWith("/api/rawbytes") && Itach is not null)
+                {
+                    if (rawQuery.Contains("clear=1")) { Itach.RawClear(); await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes("{\"cleared\":true}")); return; }
+                    var raw = Itach.RawSnapshot();
+                    var hex = string.Join(" ", raw.Select(x => x.ToString("X2")));
+                    var payload = JsonSerializer.Serialize(new { count = raw.Length, hex });
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes(payload));
+                    return;
+                }
 
                 // Camera list (name + index) — never exposes raw URLs to remote clients.
                 if (path == "/api/cameras")
@@ -346,6 +376,25 @@ public sealed class LocalServer : IDisposable
                     await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes(Av.DevicesJson()));
                     return;
                 }
+                // Sonos "My Sonos" favorites for the per-zone music picker (?ip=192.168.20.119).
+                if (path.StartsWith("/api/av/favorites") && Av is not null)
+                {
+                    string favIp = "192.168.20.119";
+                    var qi = path.IndexOf("ip=", StringComparison.Ordinal);
+                    if (qi >= 0) { var s = path.Substring(qi + 3); var amp = s.IndexOf('&'); favIp = amp >= 0 ? s.Substring(0, amp) : s; }
+                    var favJson = await Av.SonosFavoritesJsonAsync(favIp);
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes(favJson));
+                    return;
+                }
+                // Live per-amp now-playing/source (?ip=…) — reflects whatever device actually drives the amp.
+                if (path == "/api/sonos/now" && Av is not null)
+                {
+                    var nip = Qv(query, "ip");
+                    if (string.IsNullOrEmpty(nip)) { await WriteAsync(stream, "400 Bad Request", "application/json", Encoding.UTF8.GetBytes("{}")); return; }
+                    var nj = await Av.SonosNowPlayingJsonAsync(nip);
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes(nj));
+                    return;
+                }
                 if (path == "/api/av/discover" && Av is not null)
                 {
                     await Av.DiscoverAsync();
@@ -374,6 +423,187 @@ public sealed class LocalServer : IDisposable
                     }
                     return;
                 }
+                // ---- Shelly motors (TV lift, shades) over MQTT ----
+                if (path == "/api/shelly/status" && Shelly is not null)
+                {
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes(Shelly.StatusJson()));
+                    return;
+                }
+                if (path == "/api/shelly/discover" && Shelly is not null)
+                {
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes(await Shelly.DiscoverJsonAsync()));
+                    return;
+                }
+                if (method == "POST" && path == "/api/shelly/provision" && Shelly is not null)
+                {
+                    var b = await ReadBodyAsync(stream, lines);
+                    string sip = "", topic = "";
+                    try { using var d = JsonDocument.Parse(b);
+                        sip = d.RootElement.TryGetProperty("ip", out var i) ? i.GetString() ?? "" : "";
+                        topic = d.RootElement.TryGetProperty("topic", out var t) ? t.GetString() ?? "" : ""; } catch { }
+                    bool ok = sip.Length > 0 && await Shelly.ProvisionAsync(sip, topic);
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes(ok ? "{\"ok\":true}" : "{\"ok\":false}"));
+                    return;
+                }
+                if (method == "GET" && path == "/api/shelly/config" && Shelly is not null)
+                {
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes(Shelly.ConfigJson()));
+                    return;
+                }
+                if (method == "POST" && path == "/api/shelly/config" && Shelly is not null)
+                {
+                    var b = await ReadBodyAsync(stream, lines);
+                    List<ShellyMotor> motors = new();
+                    try { motors = JsonSerializer.Deserialize<List<ShellyMotor>>(b) ?? new(); } catch { }
+                    Shelly.SetConfig(motors);
+                    OnShellyConfig?.Invoke(motors);   // persist to settings.json
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes("{\"ok\":true}"));
+                    return;
+                }
+                if (method == "POST" && path == "/api/shelly/timer" && Shelly is not null)
+                {
+                    var b = await ReadBodyAsync(stream, lines);
+                    string key = ""; int secs = 0;
+                    try { using var d = JsonDocument.Parse(b);
+                        key = d.RootElement.TryGetProperty("key", out var k) ? k.GetString() ?? "" : "";
+                        secs = d.RootElement.TryGetProperty("secs", out var s) && s.TryGetInt32(out var sv) ? sv : 0; } catch { }
+                    if (!string.IsNullOrEmpty(key) && secs > 0)
+                    {
+                        var updated = Shelly.SetTimer(key, secs);   // updates travel timer + pushes firmware auto-off
+                        OnShellyConfig?.Invoke(updated);            // persist to settings.json
+                    }
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes("{\"ok\":true}"));
+                    return;
+                }
+                if (method == "POST" && path == "/api/shelly/set" && Shelly is not null)
+                {
+                    var b = await ReadBodyAsync(stream, lines);
+                    string key = "", act = ""; bool hold = false; double target = -1;
+                    try { using var d = JsonDocument.Parse(b);
+                        key = d.RootElement.TryGetProperty("key", out var k) ? k.GetString() ?? "" : "";
+                        act = d.RootElement.TryGetProperty("action", out var a) ? a.GetString() ?? "" : "";
+                        hold = d.RootElement.TryGetProperty("hold", out var h) && (h.ValueKind == JsonValueKind.True || (h.ValueKind == JsonValueKind.String && h.GetString() == "1"));
+                        if (d.RootElement.TryGetProperty("target", out var tg) && tg.TryGetDouble(out var tv)) target = tv; } catch { }
+                    var kc = key; var ac = act; var hc = hold; var tc = target;
+                    if (ac == "goto" && tc >= 0)
+                        _ = Task.Run(() => Shelly.GotoAsync(kc, tc / 100.0));   // move to a specific % (HALF etc.)
+                    else
+                        _ = Task.Run(() => Shelly.CommandAsync(kc, ac, hc));   // fire-and-forget so the UI never blocks
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes("{\"ok\":true}"));
+                    return;
+                }
+
+                // ---- Spotify (full Web-API control of the Sonos amps) ----
+                if (path == "/api/spotify/status" && Spotify is not null)
+                {
+                    var js = "{\"clientId\":" + (Spotify.HasClientId ? "true" : "false") + ",\"connected\":" + (Spotify.Connected ? "true" : "false") + "}";
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes(js));
+                    return;
+                }
+                if (method == "POST" && path == "/api/spotify/clientid" && Spotify is not null)
+                {
+                    var b = await ReadBodyAsync(stream, lines);
+                    string cid = "";
+                    try { using var d = JsonDocument.Parse(b); cid = d.RootElement.TryGetProperty("clientId", out var c) ? c.GetString()?.Trim() ?? "" : ""; } catch { }
+                    Spotify.SetClientId(cid);   // keep existing refresh token
+                    OnSpotifyClientId?.Invoke(cid);
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes("{\"ok\":true}"));
+                    return;
+                }
+                if (path == "/api/spotify/login" && Spotify is not null)
+                {
+                    var url = Spotify.BuildAuthUrl();
+                    try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes("{\"ok\":true,\"url\":" + JsonSerializer.Serialize(url) + "}"));
+                    return;
+                }
+                if (path == "/spotify/callback" && Spotify is not null)
+                {
+                    string code = Qv(query, "code"), st = Qv(query, "state");
+                    bool ok = !string.IsNullOrEmpty(code) && await Spotify.HandleCallbackAsync(code, st);
+                    var html = "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'><body style='background:#0b1218;color:#e8f0f2;font-family:system-ui;text-align:center;padding-top:20vh'><h2>" + (ok ? "✓ Spotify connected" : "✗ Spotify connection failed") + "</h2><p style='color:#7d939e'>You can close this tab and return to the dashboard.</p></body>";
+                    await WriteAsync(stream, ok ? "200 OK" : "400 Bad Request", "text/html", Encoding.UTF8.GetBytes(html));
+                    return;
+                }
+                if (path == "/api/spotify/search" && Spotify is not null)
+                {
+                    var js = await Spotify.SearchJsonAsync(Qv(query, "q"));
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes(js));
+                    return;
+                }
+                if (path == "/api/spotify/devices" && Spotify is not null)
+                {
+                    var js = await Spotify.DevicesJsonAsync();
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes(js));
+                    return;
+                }
+                if (path == "/api/spotify/now" && Spotify is not null)
+                {
+                    var js = await Spotify.NowPlayingJsonAsync();
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes(js));
+                    return;
+                }
+                if (method == "POST" && path == "/api/spotify/play" && Spotify is not null)
+                {
+                    var b = await ReadBodyAsync(stream, lines);
+                    string zone = "", uri = ""; bool ctx = false;
+                    try { using var d = JsonDocument.Parse(b);
+                        zone = d.RootElement.TryGetProperty("zone", out var z) ? z.GetString() ?? "" : "";
+                        uri = d.RootElement.TryGetProperty("uri", out var u) ? u.GetString() ?? "" : "";
+                        ctx = d.RootElement.TryGetProperty("ctx", out var c) && (c.ValueKind == JsonValueKind.True || (c.ValueKind == JsonValueKind.String && c.GetString() == "1")); } catch { }
+                    var zc = zone; var uc = uri; var cc = ctx;
+                    _ = Task.Run(() => Spotify.PlayAsync(zc, uc, cc));
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes("{\"ok\":true}"));
+                    return;
+                }
+                if (method == "POST" && path == "/api/spotify/control" && Spotify is not null)
+                {
+                    var b = await ReadBodyAsync(stream, lines);
+                    string zone = "", act = "";
+                    try { using var d = JsonDocument.Parse(b);
+                        zone = d.RootElement.TryGetProperty("zone", out var z) ? z.GetString() ?? "" : "";
+                        act = d.RootElement.TryGetProperty("action", out var a) ? a.GetString() ?? "" : ""; } catch { }
+                    var zc = zone; var ac2 = act;
+                    _ = Task.Run(() => Spotify.ControlAsync(zc, ac2));
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes("{\"ok\":true}"));
+                    return;
+                }
+
+                // ---- Scenes + automations ----
+                if (path == "/api/scenes" && method == "GET" && GetScenesJson is not null)
+                {
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes(GetScenesJson() ?? "[]"));
+                    return;
+                }
+                if (path == "/api/scenes" && method == "POST" && OnScenesSave is not null)
+                {
+                    var b = await ReadBodyAsync(stream, lines);
+                    try { using var _ = JsonDocument.Parse(b); OnScenesSave(b); } catch { }   // only persist valid JSON
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes("{\"ok\":true}"));
+                    return;
+                }
+                if (path == "/api/scene/run" && method == "POST" && OnRunScene is not null)
+                {
+                    var b = await ReadBodyAsync(stream, lines);
+                    string id = "";
+                    try { using var d = JsonDocument.Parse(b); id = d.RootElement.TryGetProperty("id", out var i) ? i.GetString() ?? "" : ""; } catch { }
+                    OnRunScene(id);
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes("{\"ok\":true}"));
+                    return;
+                }
+                if (path == "/api/automations" && method == "GET" && GetAutomationsJson is not null)
+                {
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes(GetAutomationsJson() ?? "[]"));
+                    return;
+                }
+                if (path == "/api/automations" && method == "POST" && OnAutomationsSave is not null)
+                {
+                    var b = await ReadBodyAsync(stream, lines);
+                    try { using var _ = JsonDocument.Parse(b); OnAutomationsSave(b); } catch { }
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes("{\"ok\":true}"));
+                    return;
+                }
+
                 if (method == "POST" && path == "/api/av/control" && Av is not null)
                 {
                     var b = await ReadBodyAsync(stream, lines);
@@ -386,8 +616,12 @@ public sealed class LocalServer : IDisposable
                         val = d.RootElement.TryGetProperty("value", out var v) ? (v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : v.ToString()) : "";
                     }
                     catch { }
-                    var res = await Av.ControlAsync(devId, act, string.IsNullOrEmpty(val) ? null : val);
-                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { result = res })));
+                    // Fire-and-forget: respond instantly so a slow or powered-off device (e.g. a Samsung TV
+                    // whose WebSocket can hang ~45s) can NEVER stall the UI or pile up connections. The device
+                    // reacts when ready; the browser UI updates optimistically and ignores this response body.
+                    var devIdC = devId; var actC = act; var valC = val;
+                    _ = Task.Run(() => Av.ControlAsync(devIdC, actC, string.IsNullOrEmpty(valC) ? null : valC));
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes("{\"ok\":true}"));
                     return;
                 }
 
@@ -398,6 +632,15 @@ public sealed class LocalServer : IDisposable
     }
 
     /// <summary>Reads the request body using the Content-Length header.</summary>
+    /// <summary>Get a URL-decoded query-string value from the parsed "k=v" array ("" if absent).</summary>
+    private static string Qv(string[] query, string key)
+    {
+        var pre = key + "=";
+        var hit = query.FirstOrDefault(l => l.StartsWith(pre, StringComparison.Ordinal));
+        if (hit is null) return "";
+        try { return Uri.UnescapeDataString(hit[pre.Length..].Replace('+', ' ')); } catch { return hit[pre.Length..]; }
+    }
+
     private async Task<string> ReadBodyAsync(NetworkStream stream, string[] lines)
     {
         int len = 0;

@@ -20,6 +20,21 @@ public sealed class Ip2slClient : IDisposable
 
     // latest field array per channel ("00".."03", "FE","FF")
     private readonly ConcurrentDictionary<string, int[]> _channels = new();
+
+    // Raw-bus capture (for reverse-engineering command codes): keeps the last ~16 KB of everything the
+    // iTach receives, so a physical button press can be inspected byte-for-byte, not just the parsed state.
+    private readonly object _rawLock = new();
+    private readonly List<byte> _rawRing = new();
+    public byte[] RawSnapshot() { lock (_rawLock) return _rawRing.ToArray(); }
+    public void RawClear() { lock (_rawLock) _rawRing.Clear(); }
+    private void RawCapture(byte[] b, int n)
+    {
+        lock (_rawLock)
+        {
+            for (int i = 0; i < n; i++) _rawRing.Add(b[i]);
+            if (_rawRing.Count > 16384) _rawRing.RemoveRange(0, _rawRing.Count - 8192);
+        }
+    }
     private readonly CancellationTokenSource _cts = new();
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private TcpClient? _tcp;
@@ -62,10 +77,12 @@ public sealed class Ip2slClient : IDisposable
             (byte)((code >> 16) & 0xFF),
             (byte)((code >> 24) & 0xFF),
         };
-        for (int i = 0; i < 3; i++)
+        // Send twice with a short gap for reliability (was 3x/250ms — far too slow over the
+        // iTach's slow serial drain). No trailing delay after the final write.
+        for (int i = 0; i < 2; i++)
         {
             await WriteAsync(b);
-            await Task.Delay(250);
+            if (i == 0) await Task.Delay(80);
         }
     }
 
@@ -95,7 +112,13 @@ public sealed class Ip2slClient : IDisposable
             try
             {
                 _tcp = new TcpClient { NoDelay = true };
-                await _tcp.ConnectAsync(Host, Port, _cts.Token);
+                // Bound the connect so a powered-off / unplugged iTach fails in ~4s instead of the OS's
+                // ~21s SYN timeout — that long hang was dragging the whole app. Fast fail → fast retry.
+                using (var connectCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token))
+                {
+                    connectCts.CancelAfter(4000);
+                    await _tcp.ConnectAsync(Host, Port, connectCts.Token);
+                }
                 _stream = _tcp.GetStream();
                 SetConnected(true);
 
@@ -103,13 +126,14 @@ public sealed class Ip2slClient : IDisposable
                 {
                     int n = await _stream.ReadAsync(bytes, _cts.Token);
                     if (n <= 0) break;
+                    RawCapture(bytes, n);
                     buf.Append(Encoding.Latin1.GetString(bytes, 0, n));
                     ParseFrames(buf);
                     if (buf.Length > 4000) buf.Remove(0, buf.Length - 2000);
                 }
             }
-            catch (OperationCanceledException) { break; }
-            catch { /* fallthrough to reconnect */ }
+            catch (OperationCanceledException) when (_cts.IsCancellationRequested) { break; }  // app shutdown only
+            catch { /* connect timeout or any I/O error → fall through and reconnect */ }
 
             SetConnected(false);
             try { _stream?.Dispose(); _tcp?.Dispose(); } catch { }

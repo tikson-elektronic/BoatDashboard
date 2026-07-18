@@ -30,10 +30,14 @@ public partial class ShellWindow : Window
 
     private MqttAgent? _mqttAgent;   // onboard VOMS agent (publishes to the Alive cloud when paired)
     private readonly AvService _av = new();   // AV device discovery + control (TVs, amplifiers)
+    private readonly ShellyMqttService _shelly = new();   // TV lift + shade motors over the embedded MQTT broker
+    private readonly SpotifyService _spotify = new();     // full Spotify control of the Sonos amps
     private readonly MemoryStore _memory = new();
     private AutomationService? _autos;
     private VisionService? _vision;
     private NmeaService? _nmea;
+    private N2kService? _n2k;
+    private object? _lastNav, _lastEngines;   // latest decoded N2K payloads, merged into LAN telemetry
     private NavicoMfdService? _navico;
 
     // Claude assistant + offline voice. _vm mirrors live readings for the assistant's get_status tool.
@@ -52,6 +56,11 @@ window.vomsApply = function(d){
       if(v && typeof v==='object' && !Array.isArray(v) && t[k] && typeof t[k]==='object') merge(t[k],v);
       else t[k]=v; } })(window.LIVE, d);
     if('alarm' in d && typeof S!=='undefined') S.alarm = !!d.alarm;
+    if(d.navStatus && typeof S!=='undefined'){
+      S.anchorLight = !!d.navStatus.anchor;
+      S.navLights   = !!d.navStatus.running;
+      S.electronics = !!d.navStatus.electronics;
+    }
     if(window.render) window.render();
   }catch(e){}
 };
@@ -95,9 +104,11 @@ window.addEventListener('DOMContentLoaded', function(){
             try { _voice?.Dispose(); } catch { }
             try { _ = _mqttAgent?.DisposeAsync(); } catch { }
             try { _av.StopBackgroundScan(); } catch { }
+            try { _shelly.Dispose(); } catch { }
             try { _autos?.Stop(); } catch { }
             try { _vision?.Dispose(); } catch { }
             try { _nmea?.Dispose(); } catch { }
+            try { _n2k?.Dispose(); } catch { }
             try { _navico?.Dispose(); } catch { }
         };
     }
@@ -124,7 +135,7 @@ window.addEventListener('DOMContentLoaded', function(){
         core.ProcessFailed += (_, args) =>
         {
             Ip2slClient.Log("[selfheal] webview process failed: " + args.ProcessFailedKind);
-            Dispatcher.BeginInvoke(() => { try { Web.CoreWebView2?.Navigate("https://vessel.local/app.html"); } catch { } });
+            Dispatcher.BeginInvoke(() => { try { Web.CoreWebView2?.Navigate($"https://vessel.local/app.html?v={DateTime.UtcNow.Ticks}"); } catch { } });
         };
 
         // Serve the WebUI folder over a virtual host so relative asset paths resolve.
@@ -136,7 +147,7 @@ window.addEventListener('DOMContentLoaded', function(){
         core.AddWebResourceRequestedFilter("https://vessel.local/api/*", CoreWebView2WebResourceContext.All);
         core.WebResourceRequested += OnWebResourceRequested;
 
-        core.Navigate("https://vessel.local/app.html");
+        core.Navigate($"https://vessel.local/app.html?v={DateTime.UtcNow.Ticks}");   // cache-buster: always load fresh JS
 
         ApplyKiosk();
 
@@ -154,7 +165,11 @@ window.addEventListener('DOMContentLoaded', function(){
     /// makes new-device discoveries speak to the owner.</summary>
     private void StartVesselBrain()
     {
+        AvService.SmartThingsToken = _settings.SmartThingsToken;   // cloud TV control (primary); local is the fallback
         _av.OnNewDevice += OnNewAvDevice;
+        // Push live TV power state to the WebView so power buttons mirror reality (LAN clients poll it).
+        _av.OnPowerChanged += () => Dispatcher.BeginInvoke(() =>
+            _ = Web.CoreWebView2?.ExecuteScriptAsync($"window.avDevices({_av.DevicesJson()})"));
         _av.StartBackgroundScan();
 
         _autos = new AutomationService(RunAutoActionAsync, SensorValue);
@@ -171,6 +186,13 @@ window.addEventListener('DOMContentLoaded', function(){
         _nmea = new NmeaService(_settings.NmeaHost, _settings.NmeaPort);
         _nmea.OnUpdate += OnNmeaUpdate;
         _nmea.Start();
+
+        // NMEA 2000 direct via PEAK PCAN-USB (USB→CAN on the N2K backbone). Shares the gateway
+        // service's NavState so both feeds land on the same navigation/engine pages. Graceful
+        // no-op if PCANBasic.dll or the adapter is missing.
+        _n2k = new N2kService(_nmea.State);
+        _n2k.OnUpdate += OnNmeaUpdate;
+        _n2k.Start();
 
         // Navico HTML5 integration — advertise to Simrad/B&G/Lowrance MFDs + raise alarms on them.
         if (_settings.EnableNavicoMfd)
@@ -210,10 +232,12 @@ window.addEventListener('DOMContentLoaded', function(){
             lat = s.Lat, lon = s.Lon, sog = s.Sog, cog = s.Cog, heading = s.Heading,
             variation = s.Variation, depth = s.Depth, windSpeed = s.WindSpeed, windAngle = s.WindAngle,
             satellites = s.Satellites, hdop = s.Hdop, fix = s.FixQuality,
+            rudder = s.Rudder,
         };
         var engines = new
         {
-            running = s.AnyEngineData,
+            // "running" must mean actually turning — hours/temps are broadcast even with engines off.
+            running = (s.Engines[0].Rpm ?? 0) > 50 || (s.Engines[1].Rpm ?? 0) > 50,
             port = new { rpm = s.Engines[0].Rpm, coolant = s.Engines[0].CoolantTempC, oil = s.Engines[0].OilPressureKpa, hours = s.Engines[0].Hours, alt = s.Engines[0].AlternatorV, fuel = s.Engines[0].FuelRateLph },
             stbd = new { rpm = s.Engines[1].Rpm, coolant = s.Engines[1].CoolantTempC, oil = s.Engines[1].OilPressureKpa, hours = s.Engines[1].Hours, alt = s.Engines[1].AlternatorV, fuel = s.Engines[1].FuelRateLph },
         };
@@ -222,6 +246,12 @@ window.addEventListener('DOMContentLoaded', function(){
         {
             try { Web?.CoreWebView2?.ExecuteScriptAsync($"window.vomsApply({json})"); } catch { }
         });
+
+        // LAN clients (iPad) read /api/telemetry — nav + engines must land there too, not just in the
+        // WebView. OnTick merges these when the iTach is connected; when it isn't, OnTick returns early
+        // and never publishes, so push nav data directly to keep navigation/engines live regardless.
+        _lastNav = nav; _lastEngines = engines;
+        if (_server is not null && !_client.Connected) _server.TelemetryJson = json;
 
         // Publish the key nav + engine sensors to the cloud too.
         var m = _mqttAgent;
@@ -317,6 +347,15 @@ window.addEventListener('DOMContentLoaded', function(){
                     _voice?.Speak(a.Value ?? "");
                 });
                 break;
+            case "scene":
+                // Run a dashboard scene by id in the always-on helm WebView (reuses all its control functions
+                // + live light state). This is how a scheduled automation applies amps/TV/shades/lights/lift.
+                Dispatcher.BeginInvoke(() =>
+                {
+                    var sid = (a.Value ?? "").Replace("'", "").Replace("\\", "");
+                    try { _ = Web.CoreWebView2?.ExecuteScriptAsync($"window.runSceneById && window.runSceneById('{sid}')"); } catch { }
+                });
+                break;
         }
     }
 
@@ -395,6 +434,36 @@ window.addEventListener('DOMContentLoaded', function(){
             _server.Av = _av;
             _server.Itach = _client;
             _server.Cameras = _settings.Cameras;
+            // Shelly motors: start the embedded MQTT broker, load saved config, persist edits back to settings.json.
+            _shelly.OfflineAlarmSec = _settings.ShadeOfflineAlarmSec > 0 ? _settings.ShadeOfflineAlarmSec : 60;
+            _shelly.Start(_settings.MqttBrokerPort, _settings.MqttBrokerUser, _settings.MqttBrokerPass);
+            _shelly.SetConfig(_settings.ShellyMotors ?? new());
+            _server.Shelly = _shelly;
+            _server.OnShellyConfig = motors => { _settings.ShellyMotors = motors; SettingsStore.Save(_settings); };
+            // Shade controller offline alarm -> toast + spoken alert on the dashboard.
+            _shelly.OnShadeAlarm += (msg, isAlarm) => Dispatcher.BeginInvoke(() =>
+            {
+                try
+                {
+                    var j = JsonSerializer.Serialize(msg);
+                    _ = Web.CoreWebView2?.ExecuteScriptAsync($"window.shadeAlarm && window.shadeAlarm({j},{(isAlarm ? "true" : "false")})");
+                    if (isAlarm) _voice?.Speak(msg);
+                }
+                catch { }
+            });
+            // Spotify: full Web-API control of the Sonos amps; persist tokens/client-id back to settings.json.
+            _spotify.SetConfig(_settings.SpotifyClientId, _settings.SpotifyRefreshToken);
+            _spotify.OnRefreshToken += tok => { _settings.SpotifyRefreshToken = tok; SettingsStore.Save(_settings); };
+            _server.Spotify = _spotify;
+            _server.OnSpotifyClientId = cid => { _settings.SpotifyClientId = cid; SettingsStore.Save(_settings); };
+            // Scenes: the UI owns the JSON blob; C# stores it and runs a scene's actions in the helm WebView.
+            _server.GetScenesJson = () => _settings.ScenesJson ?? "[]";
+            _server.OnScenesSave = js => { _settings.ScenesJson = js; SettingsStore.Save(_settings); };
+            _server.OnRunScene = id => Dispatcher.BeginInvoke(() =>
+            { try { var sid = (id ?? "").Replace("'", "").Replace("\\", ""); _ = Web.CoreWebView2?.ExecuteScriptAsync($"window.runSceneById && window.runSceneById('{sid}')"); } catch { } });
+            // Automations: reuse the existing engine (time/daylight/sensor, edge-fired). UI CRUDs the whole list.
+            _server.GetAutomationsJson = () => _autos?.ListJson() ?? "[]";
+            _server.OnAutomationsSave = js => { try { _autos?.SetAllJson(js); } catch { } };
             // Route remote-browser commands through the same handler as the WebView2 bridge.
             _server.OnCommand = (cmd, code) => Dispatcher.BeginInvoke(() => RunCommand(cmd, code));
             _server.Start();
@@ -614,6 +683,14 @@ window.addEventListener('DOMContentLoaded', function(){
         double bGenA = F("00", 3) - 512, bPortA = F("00", 5) - 512, bStbdA = F("00", 7) - 512;
         double fuelToTransfer = F("03", 8), fuelToGo = F("03", 9);
 
+        // Nav-light / electronics real status — field 12 is a discrete bitmask (mirrored across channels),
+        // mapped live by toggling the physical switches and watching the bits: anchor=0x0010, electronics=0x1000,
+        // running lights=0x8000. Read-only status (no command codes are sent for these safety circuits).
+        int navBits = F("00", 12);
+        bool navAnchor = (navBits & 0x0010) != 0;
+        bool navRunning = (navBits & 0x8000) != 0;
+        bool navElectronics = (navBits & 0x1000) != 0;
+
         double waterAvg = Math.Round((waterPort + waterStbd) / 2.0);
         double fuelAvg = Math.Round((fFwdPort + fFwdStbd + fAftPort + fAftStbd) / 4.0);
         // 0.0 V = disconnected/unconfigured sensor (no data), not a dead battery — don't alarm on it.
@@ -652,6 +729,12 @@ window.addEventListener('DOMContentLoaded', function(){
             fuelAvg = (int)fuelAvg,
             service = new { v = serviceV.ToString("0.0"), low = serviceLow, noData = !serviceValid },
             alarm = serviceLow,
+            // Live NMEA 2000 nav + engine data (PCAN-USB / gateway) — empty objects merge as no-ops
+            // in the client's vomsApply, so nothing breaks before the first N2K frame arrives.
+            nav = _lastNav ?? new { },
+            engines = _lastEngines ?? new { },
+            // Real anchor/running/electronics status from the iTach digital word (field 12).
+            navStatus = new { anchor = navAnchor, running = navRunning, electronics = navElectronics },
         };
 
         var json = JsonSerializer.Serialize(live);
