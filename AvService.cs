@@ -720,6 +720,26 @@ public sealed class AvService
     /// Spotify Connect, or an AirPlay from someone's phone). Reads the amp's live transport over UPnP and
     /// classifies the source from the current URI. Returns {source,playing,title,artist}. This is what makes
     /// each amp card honest when independent people drive their own amp from their own device.</summary>
+    /// <summary>Live Samsung TV power via the :8001 REST endpoint (device.PowerState). Read-only HTTP —
+    /// does NOT touch the :8002 control socket, so it's safe to poll (unlike the old :8002 probe that broke
+    /// control). Returns "on" | "standby" | "unknown" (unknown = unreachable/timeout — caller should keep its
+    /// last known state rather than assume off, since :8001 can briefly drop while the TV is on).</summary>
+    public async Task<string> SamsungPowerAsync(string ip)
+    {
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+            using var doc = JsonDocument.Parse(await http.GetStringAsync($"http://{ip}:8001/api/v2/"));
+            if (doc.RootElement.TryGetProperty("device", out var dev) && dev.TryGetProperty("PowerState", out var ps))
+            {
+                var s = (ps.GetString() ?? "").Trim().ToLowerInvariant();
+                return s == "on" ? "on" : (s.Length > 0 ? "standby" : "unknown");
+            }
+            return "unknown";
+        }
+        catch { return "unknown"; }
+    }
+
     public async Task<string> SonosNowPlayingJsonAsync(string ip)
     {
         var ctrl = $"http://{ip}:1400/MediaRenderer/AVTransport/Control";

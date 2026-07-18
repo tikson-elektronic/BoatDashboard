@@ -92,8 +92,8 @@ public sealed class LocalServer : IDisposable
 
     public int Port { get; }
 
-    private const string RemoteBridge = @"<link rel=""icon"" type=""image/png"" href=""/uploads/lagoon-logo.png"">
-<link rel=""apple-touch-icon"" href=""/uploads/lagoon-logo.png"">
+    private const string RemoteBridge = @"<link rel=""icon"" type=""image/png"" href=""/uploads/app-icon.png"">
+<link rel=""apple-touch-icon"" href=""/uploads/app-icon.png"">
 <script>(function(){
   if(!(window.chrome&&window.chrome.webview)){
     window.__remote=true;
@@ -393,6 +393,16 @@ public sealed class LocalServer : IDisposable
                     if (string.IsNullOrEmpty(nip)) { await WriteAsync(stream, "400 Bad Request", "application/json", Encoding.UTF8.GetBytes("{}")); return; }
                     var nj = await Av.SonosNowPlayingJsonAsync(nip);
                     await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes(nj));
+                    return;
+                }
+                // Live Samsung TV power (?ip=…) via :8001 REST — control-safe, so the UI can mirror the real
+                // on/standby state without the :8002 probing that used to break control.
+                if (path == "/api/av/tvpower" && Av is not null)
+                {
+                    var tip = Qv(query, "ip");
+                    if (string.IsNullOrEmpty(tip)) { await WriteAsync(stream, "400 Bad Request", "application/json", Encoding.UTF8.GetBytes("{}")); return; }
+                    var pw = await Av.SamsungPowerAsync(tip);
+                    await WriteAsync(stream, "200 OK", "application/json", Encoding.UTF8.GetBytes("{\"power\":\"" + pw + "\"}"));
                     return;
                 }
                 if (path == "/api/av/discover" && Av is not null)

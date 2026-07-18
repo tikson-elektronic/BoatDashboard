@@ -291,7 +291,7 @@
         <div style="display:flex;align-items:baseline;gap:12px;">
           <div class="cond" style="font-weight:600;font-size:24px;letter-spacing:10px;background:linear-gradient(180deg,#f4f9fb,#9fb4be);-webkit-background-clip:text;background-clip:text;color:transparent;">LAGOON</div>
         </div>
-        <div class="cond" style="font-weight:500;font-size:13px;letter-spacing:4px;color:#54687a;">630 MOTOR YACHT · VESSEL MONITOR · BUILD 1823</div>
+        <div class="cond" style="font-weight:500;font-size:13px;letter-spacing:4px;color:#54687a;">630 MOTOR YACHT · VESSEL MONITOR · BUILD 1824</div>
       </div>
     </div>
     <div style="flex:1;"></div>
@@ -394,6 +394,20 @@ function pollSonosNow(){if(typeof S==='undefined'||S.screen!=='av')return;
       if(typeof n.mute==='boolean'&&(Date.now()-(st.volT||0))>3000){st.mute=n.mute;}
       if(!focused&&typeof render==='function')render();}).catch(function(){});});}
 setInterval(pollSonosNow,6000);setTimeout(pollSonosNow,1500);
+// Mirror the REAL Samsung TV power state (on/standby) via the control-safe :8001 read, so the card doesn't
+// show STANDBY while the TV is actually on. Skips override for 25s after a local power tap (WoL boot time).
+function pollTvPower(){if(typeof S==='undefined'||S.screen!=='av')return;
+  function one(id,key,tkey){if(!id)return;var ip=id.split(':')[0];
+    fetch('/api/av/tvpower?ip='+ip,{cache:'no-store'}).then(function(r){return r.json();}).then(function(p){
+      if(Date.now()-(S.av[tkey]||0)<25000)return;   // let a just-tapped power command settle first
+      if(p&&p.power==='on'){if(!S.av[key]){S.av[key]=true;render();}}
+      else if(p&&p.power==='standby'){if(S.av[key]){S.av[key]=false;render();}}
+      // 'unknown' (unreachable) -> keep current state
+    }).catch(function(){});}
+  one(tvId(),'tvSalon','tvSalonT');
+  one(tvCabinId(),'tvCabin','tvCabinT');
+}
+setInterval(pollTvPower,6000);setTimeout(pollTvPower,2500);
 // Shade Shelly status (online / moving / pos / alarm) for the shade cards + offline alarm.
 var _shadeStatus={};
 function pollShadeStatus(){try{fetch('/api/shelly/status',{cache:'no-store'}).then(function(r){return r.json();}).then(function(a){var m={};if(Array.isArray(a))a.forEach(function(s){m[s.key]=s;});_shadeStatus=m;var f=document.activeElement&&(document.activeElement.tagName==='INPUT'||document.activeElement.tagName==='SELECT');if(!f&&typeof render==='function')render();}).catch(function(){});}catch(e){}}
@@ -2048,7 +2062,7 @@ function avSet(k,v){
   }
   S.av[k]=v;render();
   // Mirror TV toggles to the real set.
-  if(k==='tvSalon')avCtrl(tvId(),v?'power_on':'power');   // ON = Wake-on-LAN; OFF = KEY_POWER
+  if(k==='tvSalon'){S.av.tvSalonT=Date.now();avCtrl(tvId(),v?'power_on':'power');}   // ON = Wake-on-LAN; OFF = KEY_POWER
   else if(k==='tvMute')avCtrl(tvId(),'mute');
   else if(k==='tvPlay')avCtrl(tvId(),'playpause');
   else if(k==='amp')avCtrl(sonosId(),v?'play':'pause');   // Sonos has no power — map to play/pause
@@ -2081,7 +2095,7 @@ function tvAdj(k,d){
 function tvCabinId(){var ds=S.av.devices||[];var s=[];for(var i=0;i<ds.length;i++){var d=ds[i];if((d.protocol||d.Protocol)==='samsung')s.push(d.id||d.Id);}return s[1]||s[0]||'192.168.20.108:samsung';}
 function avSetC(k,v){
   S.av[k]=v;render();
-  if(k==='tvCabin')avCtrl(tvCabinId(),v?'power_on':'power');   // ON = Wake-on-LAN; OFF = KEY_POWER
+  if(k==='tvCabin'){S.av.tvCabinT=Date.now();avCtrl(tvCabinId(),v?'power_on':'power');}   // ON = Wake-on-LAN; OFF = KEY_POWER
   else if(k==='tvcMute')avCtrl(tvCabinId(),'mute');
   else if(k==='tvcPlay')avCtrl(tvCabinId(),'playpause');
 }
