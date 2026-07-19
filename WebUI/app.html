@@ -681,7 +681,12 @@ tanks: function(){
   +'<div class="card" style="padding:20px;flex:2;min-width:340px;display:flex;flex-direction:column;">'
   +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:16px;flex-wrap:wrap;"><div style="font-size:12px;font-weight:700;letter-spacing:2px;color:#7d939e;">DIESEL</div>'
   +'<div onclick="tgl(\'transfer\')" style="height:40px;padding:0 14px;display:flex;align-items:center;border-radius:8px;border:1px solid '+(S.transfer?WARN:ACC)+';background:'+(S.transfer?'rgba(255,182,72,0.15)':'transparent')+';color:'+(S.transfer?WARN:ACC)+';font-size:12px;font-weight:700;letter-spacing:1px;cursor:pointer;white-space:nowrap;">'+(S.transfer?'TRANSFERRING · STOP':'START FUEL TRANSFER')+'</div></div>'
-  +'<div style="display:flex;gap:10px;flex:1;">'+tank('AFT PORT',LIVE.tanks.fuelAftPort,WARN)+tank('FWD PORT',LIVE.tanks.fuelFwdPort,WARN)+tank('AFT STBD',LIVE.tanks.fuelAftStbd,WARN)+tank('FWD STBD',LIVE.tanks.fuelFwdStbd,WARN)+'</div></div></div>';
+  +'<div style="display:flex;gap:10px;flex:1;">'+tank('AFT PORT',LIVE.tanks.fuelAftPort,WARN)+tank('FWD PORT',LIVE.tanks.fuelFwdPort,WARN)+tank('AFT STBD',LIVE.tanks.fuelAftStbd,WARN)+tank('FWD STBD',LIVE.tanks.fuelFwdStbd,WARN)+'</div>'
+  // Live fuel-transfer readings (iTach ch 03 f8/f9, litres) — amber while a transfer is pending.
+  +'<div style="display:flex;gap:18px;margin-top:16px;font-size:12px;color:#7d939e;">'
+    +'<div><span style="color:'+(LIVE.fuelTransfer.toTransfer>0?WARN:'#9fb4be')+';font-weight:600;">'+LIVE.fuelTransfer.toTransfer+' L</span> · to transfer</div>'
+    +'<div><span style="color:#9fb4be;font-weight:600;">'+LIVE.fuelTransfer.toGo+' L</span> · to go</div>'
+  +'</div></div></div>';
 },
 navigation: function(){
   var d=S.navd;

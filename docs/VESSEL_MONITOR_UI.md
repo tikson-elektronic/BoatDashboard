@@ -111,10 +111,12 @@ hardware connected, the design's demo values remain (nothing overwrites them).
 | Fuel — aft stbd | ch `03` f11 | value | `tanks.fuelAftStbd` |
 | Service bank | ch `00` f8 | ÷ 10 → V | `service.v` (+ `service.low` when < 22 V) |
 | Shore 1 (home AC) | ch `02` f0/f1/f2 | Hz = f2 ÷ 10 | `ac.v` / `ac.a` / `ac.hz` |
+| Fuel transfer | ch `03` f8/f9 | litres | `fuelTransfer.toTransfer` / `fuelTransfer.toGo` |
 
 `waterAvg` / `fuelAvg` are computed averages. `alarm` (topbar chip + battery tile) tracks
-`service.low`. **Only the HOME tiles are bound so far**; the AC / batteries / tanks detail
-screens still show demo values (future work).
+`service.low`. The HOME tiles **and** the AC / batteries / tanks detail screens are bound
+(`acDetail`, `batteries`, `tanks`, `fuelTransfer`); the TANKS screen shows the live
+fuel-transfer litres under the diesel gauges (amber while a transfer is pending).
 
 ---
 
