@@ -110,6 +110,23 @@ came up and served `:8080`.
 - A **stable** URL requires a *named* tunnel (Cloudflare account + domain) — **not set up yet.** Until
   then the URL changes on every restart, so it must be re-shared after each reboot.
 
+### Local hostname — `av-os.local` (mDNS/Bonjour)
+On the boat LAN the dashboard answers to **`http://av-os.local:8080`** (no need for the raw IP). This is
+served by **Apple Bonjour** (installed via winget `Apple.Bonjour`) driven by a scheduled task
+**`AvOsMdns`** (AtStartup, SYSTEM, single instance) running:
+```
+dns-sd -P av-os _avos._tcp local 8080 av-os.local 192.168.20.8 path=/app.html app=BoatDashboard ver=1
+```
+This advertises both the **A record** `av-os.local → 192.168.20.8` and a discoverable **service
+`_avos._tcp`** (with TXT metadata) that client apps browse for — see `API_REFERENCE.md` §9 for the
+Flutter discovery flow. Port stays **8080** (deliberately not moved to 80).
+Manage: `Get/Start/Stop/Unregister-ScheduledTask -TaskName AvOsMdns`; verify with
+`Resolve-DnsName av-os.local` and `dns-sd -B _avos._tcp`. Exactly one `dns-sd` process should run.
+
+> ⚠️ Installing Bonjour blipped the network and **wedged the running dashboard's HTTP accept loop**
+> (process alive + listening, but every request timed out, connections stuck in **CloseWait**). If you
+> see that signature, restart the app — it is not an mDNS problem.
+
 ---
 
 ## 5. Network & device inventory

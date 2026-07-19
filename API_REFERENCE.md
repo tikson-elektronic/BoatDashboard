@@ -14,7 +14,8 @@ dashboard is just one client of this same API — a Flutter app is a peer, not a
 
 | | |
 |---|---|
-| **Base URL (LAN)** | `http://192.168.20.8:8080` |
+| **Base URL (LAN)** | `http://av-os.local:8080` (mDNS name — preferred) or `http://192.168.20.8:8080` |
+| **Auto-discovery** | mDNS/Bonjour service `_avos._tcp` (see §9) — recommended so the app never hard-codes an IP |
 | **Base URL (remote)** | the current `https://<random>.trycloudflare.com` (see below) |
 | **Protocol** | HTTP/1.1, `Connection: close` per request (no keep-alive, no WebSocket for the API) |
 | **Content type** | JSON in, JSON out (`application/json`). All response bodies are `no-store`. |
@@ -239,3 +240,68 @@ Shelly at the boat's broker.
 - Command methods are thin `POST` calls that return void-ish (`{"ok":true}`); never block UI on them.
 - Handle the **device-approval handshake** on first launch (LAN) and **Basic Auth** (tunnel).
 - Do not hard-code the tunnel URL; do not send unknown `/api/cmd` codes.
+
+---
+
+## 9. Service discovery (mDNS/Bonjour) — how the Flutter app finds the boat
+
+The PC advertises the dashboard over **mDNS** (Bonjour) so the app finds it automatically, with no
+hard-coded IP. Two ways to use it, easiest first:
+
+**A. Just use the name.** The host **`av-os.local`** always resolves to the dashboard on the boat LAN
+(no browsing needed — iOS/macOS/Android/Windows all resolve `.local`). Point the app at
+`http://av-os.local:8080`. This alone removes the IP problem.
+
+**B. Browse for the service** (robust — survives an IP change and lets the app auto-configure). The
+dashboard publishes:
+
+| | |
+|---|---|
+| **Service type** | `_avos._tcp` (domain `local.`) |
+| **Instance name** | `av-os` |
+| **Host / port** | `av-os.local` : **8080** |
+| **TXT records** | `path=/app.html`, `app=BoatDashboard`, `ver=1` |
+
+Flow: browse `_avos._tcp` → resolve the instance → you get host `av-os.local`, port `8080`, the TXT
+map, and the A-record IP `192.168.20.8`. Build the base URL from host+port and proceed with §1 auth.
+
+### Flutter example (`bonsoir` — cross-platform)
+```dart
+import 'package:bonsoir/bonsoir.dart';
+
+Future<String> discoverBoat() async {
+  final discovery = BonsoirDiscovery(type: '_avos._tcp');
+  await discovery.ready;
+  final completer = Completer<String>();
+  discovery.eventStream!.listen((event) {
+    if (event.type == BonsoirDiscoveryEventType.discoveryServiceResolved) {
+      final s = event.service!;                 // s.host, s.port, s.attributes (TXT)
+      final host = s.host ?? 'av-os.local';
+      completer.complete('http://$host:${s.port}');   // e.g. http://av-os.local:8080
+    } else if (event.type == BonsoirDiscoveryEventType.discoveryServiceFound) {
+      event.service!.resolve(discovery.serviceResolver); // must resolve to get host/port
+    }
+  });
+  await discovery.start();
+  return completer.future.timeout(const Duration(seconds: 5),
+      onTimeout: () => 'http://av-os.local:8080');       // fallback to the name
+}
+```
+(`multicast_dns` is a lighter pure-Dart alternative if you prefer no plugin.)
+
+### Platform setup (required, or discovery silently returns nothing)
+- **iOS 14+** — in `ios/Runner/Info.plist`:
+  ```xml
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Finds the boat dashboard on the local network.</string>
+  <key>NSBonjourServices</key>
+  <array><string>_avos._tcp</string></array>
+  ```
+  Without both keys iOS blocks mDNS and the browse returns empty (this is the #1 gotcha).
+- **Android** — no manifest change needed for NSD; if you later restrict, keep `INTERNET` +
+  `CHANGE_WIFI_MULTICAST_STATE`. Discovery only works while on the boat's Wi-Fi.
+- **Remote (off-boat via the Cloudflare tunnel)** — mDNS is LAN-only, so discovery won't work remotely;
+  fall back to the tunnel URL there.
+
+> Server side: advertised by Bonjour via the Windows scheduled task `AvOsMdns`
+> (`dns-sd -P av-os _avos._tcp local 8080 av-os.local 192.168.20.8 …`). See `OPERATIONS.md`.
