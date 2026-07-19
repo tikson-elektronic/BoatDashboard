@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html><head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Lagoon 630 MY — Vessel Monitor</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
@@ -198,7 +198,8 @@
 <style>
   html,body{margin:0;padding:0;background:#0a1014;height:100%;}
   /* Kiosk touch behaviour: no long-press magnifier/callout loupe, no grey tap-highlight, no text selection. */
-  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;touch-action:manipulation;}
+  html,body{touch-action:manipulation;overscroll-behavior:none;}
   /* keep real inputs usable (scene/automation name, time pickers, dropdowns) */
   input,textarea,select{-webkit-user-select:auto;user-select:auto;-webkit-touch-callout:default;}
   a{color:#2fc4d1;text-decoration:none;} a:hover{color:#7de3ec;}
@@ -291,7 +292,7 @@
         <div style="display:flex;align-items:baseline;gap:12px;">
           <div class="cond" style="font-weight:600;font-size:24px;letter-spacing:10px;background:linear-gradient(180deg,#f4f9fb,#9fb4be);-webkit-background-clip:text;background-clip:text;color:transparent;">LAGOON</div>
         </div>
-        <div class="cond" style="font-weight:500;font-size:13px;letter-spacing:4px;color:#54687a;">630 MOTOR YACHT · VESSEL MONITOR · BUILD 1825</div>
+        <div class="cond" style="font-weight:500;font-size:13px;letter-spacing:4px;color:#54687a;">630 MOTOR YACHT · VESSEL MONITOR · BUILD 1836</div>
       </div>
     </div>
     <div style="flex:1;"></div>
@@ -312,6 +313,9 @@
   </div>
 </div>
 <script>
+// Kiosk: block iOS pinch-zoom (Safari ignores user-scalable=no); touch-action:manipulation kills double-tap zoom.
+['gesturestart','gesturechange','gestureend'].forEach(function(evt){document.addEventListener(evt,function(e){e.preventDefault();},{passive:false});});
+document.addEventListener('dblclick',function(e){e.preventDefault();},{passive:false});
 var S = {
   screen:(function(){try{var s=new URLSearchParams(location.search).get('screen');return s||'home';}catch(e){return 'home';}})(), navLights:false, anchorLight:false, electronics:true, transfer:false,
   lightPos:{navGreen:[1.5,56],navRed:[1.5,64],navStern:[98,52],anchor:[26,2]},
@@ -368,7 +372,7 @@ function bitmonRender(chans){var html='';chans.forEach(function(c){if(c.channel=
     html+='<span style="width:30px;text-align:right;color:#4a5b66;flex-shrink:0;">'+val+'</span></div>';_bitPrev[key]=val;});
   html+='</div>';});return html;}
 function bitmonPoll(){if(typeof S==='undefined'||S.screen!=='settings')return;
-  fetch('/api/raw',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){var el=document.getElementById('bitmon');if(el&&d.channels)el.innerHTML=bitmonRender(d.channels);}).catch(function(){});}
+  fetch('/api/raw',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){var el=document.getElementById('bitmon');if(el&&d.channels){var h=bitmonRender(d.channels);if(h!==el._lastHtml){el.innerHTML=h;el._lastHtml=h;}}}).catch(function(){});}   // only repaint when something actually changed (no blink)
 setInterval(bitmonPoll,700);
 // Audible click on button presses (iPad has no haptics; Web Audio works after a user gesture).
 var _actx=null;
@@ -410,8 +414,11 @@ function pollTvPower(){if(typeof S==='undefined'||S.screen!=='av')return;
 setInterval(pollTvPower,6000);setTimeout(pollTvPower,2500);
 // Shade Shelly status (online / moving / pos / alarm) for the shade cards + offline alarm.
 var _shadeStatus={};
-function pollShadeStatus(){try{fetch('/api/shelly/status',{cache:'no-store'}).then(function(r){return r.json();}).then(function(a){var m={};if(Array.isArray(a))a.forEach(function(s){m[s.key]=s;});_shadeStatus=m;var f=document.activeElement&&(document.activeElement.tagName==='INPUT'||document.activeElement.tagName==='SELECT');if(!f&&typeof render==='function')render();}).catch(function(){});}catch(e){}}
-setInterval(function(){if(typeof S!=='undefined'&&S.screen==='av')pollShadeStatus();},5000);
+function pollShadeStatus(){try{fetch('/api/shelly/status',{cache:'no-store'}).then(function(r){return r.json();}).then(function(a){var m={};if(Array.isArray(a))a.forEach(function(s){m[s.key]=s;
+      // sync the card to the backend's remembered position (skip a shade that's mid-move so we don't stomp it)
+      if(s.key.indexOf('shade')===0&&typeof s.pos==='number'){var sk=s.key.slice(5).toLowerCase();if(S.shades[sk]!==undefined&&!_shadeAnims[sk])S.shades[sk]=Math.round(s.pos);}
+    });_shadeStatus=m;var f=document.activeElement&&(document.activeElement.tagName==='INPUT'||document.activeElement.tagName==='SELECT');if(!f&&typeof render==='function')render();}).catch(function(){});}catch(e){}}
+setInterval(function(){if(typeof S!=='undefined'&&(S.screen==='av'||S.screen==='shades'))pollShadeStatus();},5000);
 setTimeout(pollShadeStatus,2500);
 // Offline-alarm toast pushed from the backend when a shade controller drops off the broker.
 var _toastMsg='',_toastTimer=null;
@@ -1209,14 +1216,7 @@ settings: function(){
   +spotifyConfigHtml()
   +'<div style="font-size:12px;font-weight:700;letter-spacing:2px;color:#7d939e;margin-top:10px;">CONTROLLER BIT MONITOR &mdash; LIVE</div>'
   +'<div class="card" style="padding:14px 16px;">'
-    +'<div style="font-size:12px;color:#9fb4be;line-height:1.5;margin-bottom:10px;">Every telemetry bit, live. <b style="color:#2fc4d1;">Flip a switch (or tap a button below) and watch which bit flashes amber</b> &mdash; that maps the bit to the function. Teal square = 1, dark = 0. Hover a bit for its channel/field/bit.</div>'
-    +'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;">'
-      +'<div onclick="bitSend(\'all_on\',0)" style="'+_bbtn+'background:#1d3a41;color:#2fc4d1;">ALL ON</div>'
-      +'<div onclick="bitSend(\'all_off\',0)" style="'+_bbtn+'">ALL OFF</div>'
-      +[['CRTSY',0x0009],['PFCAB',0x0100],['PFGNG',0x0200],['PMCAB',0x0300],['GALLEY',0x0500],['SALON',0x0800],['SFCAB',0x0900],['SACAB',0x0D00],['0x400',0x0400],['0xA00',0x0A00],['0xB00',0x0B00],['0xC00',0x0C00],['0xE00',0x0E00],['0xF00',0x0F00]].map(function(c){return '<div onclick="bitSend(\'light\','+c[1]+')" style="'+_bbtn+'">'+c[0]+'</div>';}).join('')
-      +'<input id="bitcustom" placeholder="hex e.g. 1000" style="height:30px;width:110px;border-radius:7px;border:1px solid #2a3844;background:#0a1014;color:#e8f0f2;padding:0 10px;font-family:monospace;font-size:12px;">'
-      +'<div onclick="bitSend(\'light\',parseInt((document.getElementById(&quot;bitcustom&quot;).value||&quot;0&quot;),16))" style="'+_bbtn+'background:#1d3a41;color:#2fc4d1;">SEND</div>'
-    +'</div>'
+    +'<div style="font-size:12px;color:#9fb4be;line-height:1.5;margin-bottom:10px;">Every telemetry bit, live &mdash; <b style="color:#2fc4d1;">read-only</b>. Flip a switch on the boat and watch which bit flashes amber; that maps the bit to the function. Teal square = 1, dark = 0. Hover a bit for its channel/field/bit.</div>'
     +'<div id="bitmon" style="max-height:52vh;overflow:auto;">starting live view&hellip;</div>'
   +'</div>'
   +'<div style="font-size:12px;font-weight:700;letter-spacing:2px;color:#7d939e;margin-top:10px;">SCENES &amp; AUTOMATION</div>'
@@ -1266,16 +1266,39 @@ av: function(){
     return '<div style="display:flex;flex-direction:column;width:64px;">'+half(upLbl,upAction,'10px 10px 0 0')+half(downLbl,downAction,'0 0 10px 10px')+'</div>';
   }
   var lift=a.liftUp;
+  // ---- floating TV LIFT + SWING control panel (overlays the TV visual, top-right) — reuses the real handlers ----
+  var _liftMv=a.liftMoving||'';
+  var _liftPct=Math.max(0,Math.min(100,Math.round((118-_liftCurrent())/106*100)));
+  function _lseg(t){var on=(t==='AUTO')===!!a.liftAuto;return '<span style="padding:5px 13px;background:'+(on?'#1d3a41':'transparent')+';color:'+(on?'#2fc4d1':'#54687a')+';">'+t+'</span>';}
+  function _ldir(dir,icon,label){var moving=_liftMv===dir;var h=a.liftAuto?('onclick="liftGo(&quot;'+dir+'&quot;)"'):('onpointerdown="liftHoldStart(&quot;'+dir+'&quot;)" onpointerup="liftHoldStop()" onpointerleave="liftHoldStop()" onpointercancel="liftHoldStop()"');
+    return '<div '+h+' style="height:46px;display:flex;align-items:center;justify-content:center;gap:8px;border-radius:11px;font-size:11px;font-weight:700;letter-spacing:1.5px;cursor:pointer;user-select:none;touch-action:none;background:'+(moving?'linear-gradient(180deg,#20424a,#16333a)':'linear-gradient(180deg,#26343f,#1a242d)')+';border:1px solid '+(moving?'#2fc4d1':'rgba(255,255,255,0.09)')+';color:'+(moving?'#2fc4d1':'#c2d2da')+';box-shadow:'+(moving?'0 0 16px rgba(47,196,209,0.28)':'0 2px 5px rgba(0,0,0,0.4)')+';"><span style="font-size:15px;">'+icon+'</span>'+label+'</div>';}
+  function _sdir(dir,label){var moving=(a.swingMoving||'')===dir;var h=!a.liftUp?'':('onpointerdown="swingHoldStart(&quot;'+dir+'&quot;)" onpointerup="swingHoldStop()" onpointerleave="swingHoldStop()" onpointercancel="swingHoldStop()"');
+    return '<div '+h+' style="flex:1;height:38px;display:flex;align-items:center;justify-content:center;border-radius:9px;font-size:10px;font-weight:700;letter-spacing:1px;cursor:pointer;user-select:none;touch-action:none;background:'+(moving?'linear-gradient(180deg,#1d3a41,#16333a)':'linear-gradient(180deg,#26343f,#1a242d)')+';border:1px solid '+(moving?'rgba(47,196,209,0.6)':'rgba(255,255,255,0.08)')+';color:'+(moving?'#2fc4d1':'#c2d2da')+';">'+label+'</div>';}
+  var liftPanel='<div style="width:216px;flex-shrink:0;background:linear-gradient(180deg,#131b22,#0e161d);border:1px solid #24333d;border-radius:14px;padding:15px;box-shadow:0 12px 30px rgba(0,0,0,0.5);">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:11px;"><span style="font-size:10px;font-weight:700;letter-spacing:2px;color:#7d939e;">TV LIFT'+(_liftMv?' <span style="color:#2fc4d1;">·'+(_liftMv==="up"?"RAISING":"LOWERING")+'</span>':'')+'</span><span class="cond" style="font-size:17px;font-weight:700;color:#2fc4d1;">'+_liftPct+'%</span></div>'
+    +'<div onclick="liftModeToggle()" title="HOLD = moves only while pressed. AUTO = runs to the limit." style="display:flex;border:1px solid #2a3844;border-radius:9px;overflow:hidden;cursor:pointer;font-size:10px;font-weight:700;letter-spacing:1.5px;margin-bottom:11px;">'+_lseg('HOLD')+_lseg('AUTO')+'</div>'
+    +'<div style="display:flex;flex-direction:column;gap:9px;">'+_ldir('up','▲','RAISE')
+    +(a.liftAuto&&_liftMv?'<div onclick="liftStop()" style="height:42px;display:flex;align-items:center;justify-content:center;gap:7px;border-radius:11px;font-size:10px;font-weight:700;letter-spacing:1px;cursor:pointer;background:linear-gradient(180deg,#3a1d1d,#331616);border:1px solid rgba(255,77,79,0.5);color:#ff8a8c;">■ STOP</div>':'')
+    +_ldir('down','▼','LOWER')+'</div>'
+    +'<div style="border-top:1px solid #1f2b34;margin:13px 0 10px;"></div>'
+    +'<div style="font-size:10px;font-weight:700;letter-spacing:2px;color:#7d939e;margin-bottom:8px;">SWING</div>'
+    +'<div style="display:flex;gap:7px;opacity:'+(a.liftUp?1:0.4)+';transition:opacity .3s;">'+_sdir('up','◀ FWD')+_sdir('down','HOME ▶')+'</div>'
+    +(a.liftUp?'':'<div style="font-size:8px;color:#54687a;margin-top:7px;">raise TV fully up first</div>')
+    +'<div style="font-size:8px;color:#4a5d6b;margin-top:10px;letter-spacing:0.3px;">'+(a.liftAuto?'Tap to run to the limit — auto-stops.':'Hold to move — release stops anywhere.')+'</div>'
+  +'</div>';
   // ---- SALON TV: cabinet visual + physical control cluster ----
   var tvCard='<div class="card" style="padding:22px;display:flex;flex-direction:column;gap:18px;">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;"><div><div style="font-size:13px;font-weight:700;letter-spacing:2px;">SALON TV</div><div style="font-size:12px;color:#7d939e;margin-top:3px;">55\u2033 \u00b7 motorised lift</div></div>'
     +'<div style="display:flex;align-items:center;gap:8px;"><div style="width:8px;height:8px;border-radius:50%;background:'+(a.tvBooting?'#ffd66b':(a.tvSalon?OK:'#2a3844'))+';'+((a.tvSalon||a.tvBooting)?'box-shadow:0 0 8px rgba(53,208,127,0.7);':'')+'"></div><span style="font-size:11px;font-weight:700;letter-spacing:1.5px;color:'+(a.tvBooting?'#ffd66b':(a.tvSalon?OK:'#7d939e'))+';">'+(a.tvBooting?'STARTING':(a.tvSalon?'ON':'STANDBY'))+'</span></div></div>'
-    +'<div style="position:relative;height:150px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,#0e161d,#131b22);">'
+    +'<div style="display:flex;gap:16px;align-items:flex-start;">'
+    +'<div style="flex:1;min-width:0;position:relative;height:210px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,#0e161d,#131b22);">'
       +'<div id="tvLift" style="position:absolute;left:50%;width:150px;margin-left:-75px;height:90px;border-radius:6px;border:3px solid #2a3844;top:'+_liftCurrent()+'px;background:'+(a.tvSalon?(a.tvApp==='NETFLIX'?'linear-gradient(135deg,#3d0508,#e50914 70%)':a.tvApp==='YOUTUBE'?'linear-gradient(135deg,#3d0000,#ff0000 70%)':a.tvApp==='PLEX'?'linear-gradient(135deg,#3d2a00,#e5a00d 70%)':a.tvApp==='SPOTIFY'?'linear-gradient(135deg,#00381b,#1db954 70%)':'linear-gradient(135deg,#1a4a5c,#2fc4d1 60%,#7de3ec)'):'linear-gradient(180deg,#0a0f14,#141d25)')+';box-shadow:0 6px 16px rgba(0,0,0,0.6)'+(a.tvSalon?',0 0 24px rgba(47,196,209,0.35)':'')+';display:flex;align-items:center;justify-content:center;">'
       +(a.tvSalon?'<span class="cond" style="font-size:15px;font-weight:700;letter-spacing:2px;color:rgba(255,255,255,0.92);text-shadow:0 1px 4px rgba(0,0,0,0.6);">'+(a.tvApp?a.tvApp:(a.tvInput==='TV'?'CH '+a.tvCh:a.tvInput))+'</span>':'')
       +'</div>'
       +'<div style="position:absolute;left:0;right:0;bottom:0;height:38px;background:linear-gradient(180deg,#26343f,#1a242d);border-top:2px solid #31414f;box-shadow:0 -4px 10px rgba(0,0,0,0.5);"></div>'
       +'<div style="position:absolute;left:0;right:0;bottom:38px;height:3px;background:#05090d;"></div>'
+    +'</div>'
+    +liftPanel
     +'</div>'
     // ---- REMOTE CONTROL ----
     // ---- WIDE TV CONTROL (fills the card width; not shaped like a physical remote) ----
@@ -1285,7 +1308,8 @@ av: function(){
         +'<span class="cond" style="font-size:17px;font-weight:600;letter-spacing:1.5px;color:'+(a.tvSalon?'#2fc4d1':'#54687a')+';">'+(a.tvSalon?(a.tvApp?a.tvApp:(a.tvInput==='TV'?('CH '+a.tvCh):a.tvInput)):'STANDBY')+'</span>'
         +'<span class="cond" style="font-size:17px;font-weight:700;color:'+(a.tvSalon?'#e8f0f2':'#26333e')+';margin-left:auto;">'+(a.tvSalon?(a.tvMute?'MUTED':'VOL '+a.tvVol):'')+'</span>'
       +'</div>'
-      +(function(){var mv=a.liftMoving||'';
+      +(function(){return '';/* lift control moved to the floating panel on the TV visual */
+        var mv=a.liftMoving||'';
         var pill='height:58px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border-radius:13px;font-weight:700;cursor:pointer;user-select:none;touch-action:none;transition:box-shadow .15s,border-color .15s,background .15s;';
         function dirBtn(dir,icon,label){var moving=mv===dir;
           var h=a.liftAuto?('onclick="liftGo(&quot;'+dir+'&quot;)"'):('onpointerdown="liftHoldStart(&quot;'+dir+'&quot;)" onpointerup="liftHoldStop()" onpointerleave="liftHoldStop()" onpointercancel="liftHoldStop()"');
@@ -1315,7 +1339,7 @@ av: function(){
       +'<span style="font-size:9px;color:#4a5d6b;">'+(a.tvAudioOut!=='tv'?'TV sound &rarr; Salon amp (LINE)':'Salon amp stopped')+'</span>'
     +'</div>'
     // ---- TV SWING (only when fully up; left/right = 3rd/4th Shelly output). Always hold-to-move — no auto. ----
-    +(function(){var up=a.liftUp;var mv=a.swingMoving||'';var pill='height:44px;padding:0 18px;display:flex;align-items:center;justify-content:center;border-radius:12px;font-size:11px;font-weight:700;letter-spacing:1px;cursor:pointer;user-select:none;touch-action:none;';
+    +(function(){return '';/* swing moved to the floating panel */var up=a.liftUp;var mv=a.swingMoving||'';var pill='height:44px;padding:0 18px;display:flex;align-items:center;justify-content:center;border-radius:12px;font-size:11px;font-weight:700;letter-spacing:1px;cursor:pointer;user-select:none;touch-action:none;';
       function dirBtn(dir,label){var moving=mv===dir;var h=!up?'':('onpointerdown="swingHoldStart(&quot;'+dir+'&quot;)" onpointerup="swingHoldStop()" onpointerleave="swingHoldStop()" onpointercancel="swingHoldStop()"');
         return '<div '+h+' style="'+pill+'background:'+(moving?'linear-gradient(180deg,#1d3a41,#16333a)':'linear-gradient(180deg,#26343f,#1a242d)')+';border:1px solid '+(moving?'rgba(47,196,209,0.6)':'rgba(255,255,255,0.08)')+';color:'+(moving?'#2fc4d1':'#c2d2da')+';">'+label+'</div>';}
       return '<div style="display:flex;align-items:center;gap:8px;opacity:'+(up?1:0.45)+';transition:opacity .3s;">'
@@ -1432,6 +1456,16 @@ av: function(){
     leds+='<div style="flex:1;height:'+(10+i*1.6)+'px;border-radius:2px;align-self:flex-end;background:'+(on2?c:'#1a242d')+';'+(on2?'box-shadow:0 0 6px '+c+'55;animation:vuFlick '+(0.6+i*0.13)+'s ease-in-out infinite;':'')+'"></div>';}
   // Three INDEPENDENT amp controls — each Sonos zone on its own (volume, mute, play/pause, stations).
   if(!S.av.z)S.av.z=[{vol:20,playing:false,mute:false},{vol:20,playing:false,mute:false},{vol:20,playing:false,mute:false}];
+  // rotary volume knob per Sonos zone (redesign): tick ring + machined body, drag or tap, right-click lowers
+  function zoneKnob(i,st){var v=st.mute?0:st.vol,ang=-135+v*2.7;
+    return '<div style="position:relative;width:92px;height:92px;flex-shrink:0;">'
+      +'<svg width="92" height="92" viewBox="0 0 92 92" style="position:absolute;inset:0;">'
+      +(function(){var t='';for(var k=0;k<=20;k++){var p=k*5,rad=(135+p*2.7)*Math.PI/180,x1=46+Math.cos(rad)*42,y1=46+Math.sin(rad)*42,x2=46+Math.cos(rad)*37,y2=46+Math.sin(rad)*37;t+='<line x1="'+x1.toFixed(1)+'" y1="'+y1.toFixed(1)+'" x2="'+x2.toFixed(1)+'" y2="'+y2.toFixed(1)+'" stroke="'+(p<=v&&!st.mute?'#2fc4d1':'#26333e')+'" stroke-width="'+(k%5===0?2:1)+'" stroke-linecap="round"/>';}return t;})()
+      +'</svg>'
+      +'<div onpointerdown="knobDragZ(event,'+i+')" onclick="ampVolZ('+i+',5)" oncontextmenu="event.preventDefault();ampVolZ('+i+',-5)" title="drag up/down or tap" style="position:absolute;left:13px;top:13px;width:66px;height:66px;border-radius:50%;cursor:ns-resize;touch-action:none;background:conic-gradient(from 200deg,#3a4c5c,#16212b 25%,#2c3d4b 50%,#10181f 75%,#3a4c5c);border:1px solid rgba(255,255,255,0.1);box-shadow:0 6px 14px rgba(0,0,0,0.6),inset 0 2px 3px rgba(255,255,255,0.12),inset 0 -3px 6px rgba(0,0,0,0.5);">'
+        +'<div style="position:absolute;left:50%;top:5px;width:4px;height:14px;margin-left:-2px;border-radius:2px;background:'+(st.mute?'#54687a':'#2fc4d1')+';'+(st.mute?'':'box-shadow:0 0 6px rgba(47,196,209,0.8);')+'transform-origin:2px 28px;transform:rotate('+ang+'deg);transition:transform .25s;"></div>'
+      +'</div>'
+    +'</div>';}
   var amp=SONOS_ZONES.map(function(z,i){
     var st=S.av.z[i];
     var mem=_groupMembers(i);                                   // zones following THIS zone (it's the source)
@@ -1453,11 +1487,13 @@ av: function(){
           +'<div onclick="ampMuteZ('+i+')" style="'+pill+'background:'+(st.mute?'linear-gradient(180deg,#3a1d1d,#331616)':'linear-gradient(180deg,#26343f,#1a242d)')+';border:1px solid '+(st.mute?'rgba(255,77,79,0.5)':'rgba(255,255,255,0.08)')+';color:'+(st.mute?'#ff8a8c':'#9fb4be')+';">'+(st.mute?'MUTED':'MUTE')+'</div>'
         +'</div>'
       +'</div>'
-      +'<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">'
-        +'<div onclick="ampVolZ('+i+',-5)" style="'+vbtn+'">−</div>'
-        +'<div style="flex:1;position:relative;height:12px;border-radius:6px;background:#0d151b;box-shadow:inset 0 1px 3px rgba(0,0,0,0.6);overflow:hidden;"><div style="position:absolute;left:0;top:0;bottom:0;width:'+(st.mute?0:st.vol)+'%;background:linear-gradient(90deg,#1d3a41,#2fc4d1);"></div></div>'
-        +'<div class="cond" style="width:66px;text-align:right;font-size:19px;font-weight:700;color:#e8f0f2;">'+(st.mute?'MUTE':'VOL '+st.vol)+'</div>'
-        +'<div onclick="ampVolZ('+i+',5)" style="'+vbtn+'">+</div>'
+      +'<div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;">'
+        +zoneKnob(i,st)
+        +'<div class="cond" style="font-size:12px;font-weight:700;letter-spacing:1.5px;color:#7d939e;">VOL <span style="font-size:30px;color:'+(st.mute?'#54687a':'#e8f0f2')+';margin-left:4px;">'+(st.mute?'—':st.vol)+'</span></div>'
+        +'<div style="display:flex;gap:8px;margin-left:auto;">'
+          +'<div onclick="ampVolZ('+i+',-5)" style="'+vbtn+'">−</div>'
+          +'<div onclick="ampVolZ('+i+',5)" style="'+vbtn+'">+</div>'
+        +'</div>'
       +'</div>'
       // GROUP row — pick which amp is the SOURCE (coordinator) and join/leave the group.
       +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">'
@@ -1620,7 +1656,7 @@ scenes: function(){
     return '<div style="max-width:820px;">'
       +'<div style="font-size:12px;font-weight:700;letter-spacing:2px;color:#7d939e;margin-bottom:12px;">'+(scenes.filter(function(x){return x.id===e.id;}).length?'EDIT SCENE':'NEW SCENE')+'</div>'
       +'<div class="card" style="padding:20px 22px;">'
-        +'<input value="'+esc(e.name)+'" oninput="sceSet(&quot;&quot;,&quot;name&quot;,this.value)" placeholder="Scene name (e.g. Movie Night)" style="width:100%;box-sizing:border-box;height:40px;padding:0 12px;border-radius:8px;background:#0d151b;border:1px solid #2a3844;color:#e8f0f2;font-size:15px;font-weight:600;margin-bottom:16px;">'
+        +'<input value="'+esc(e.name)+'" oninput="if(_sceneEdit)_sceneEdit.name=this.value" placeholder="Scene name (e.g. Movie Night)" style="width:100%;box-sizing:border-box;height:40px;padding:0 12px;border-radius:8px;background:#0d151b;border:1px solid #2a3844;color:#e8f0f2;font-size:15px;font-weight:600;margin-bottom:16px;">'
         +'<div style="'+lbl+'margin-bottom:4px;">AMPLIFIERS</div>'+zoneRows
         +'<div style="height:1px;background:#1b2731;margin:14px 0;"></div>'
         +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><div style="width:96px;'+lbl+'">TV (SALON)</div>'+sel('sceSet(&quot;tv&quot;,&quot;__tv&quot;,this.value)',tvOpts,tvCur)+'</div>'
@@ -1648,7 +1684,7 @@ scenes: function(){
     return '<div style="max-width:820px;">'
       +'<div style="font-size:12px;font-weight:700;letter-spacing:2px;color:#7d939e;margin-bottom:12px;">'+(autos.filter(function(x){return x.Id===au.Id;}).length?'EDIT AUTOMATION':'NEW AUTOMATION')+'</div>'
       +'<div class="card" style="padding:20px 22px;">'
-        +'<input value="'+esc(au.Name)+'" oninput="abSet(&quot;Name&quot;,this.value)" placeholder="Automation name (e.g. Movie at 10pm)" style="width:100%;box-sizing:border-box;height:40px;padding:0 12px;border-radius:8px;background:#0d151b;border:1px solid #2a3844;color:#e8f0f2;font-size:15px;font-weight:600;margin-bottom:16px;">'
+        +'<input value="'+esc(au.Name)+'" oninput="if(_autoEdit)_autoEdit.Name=this.value" placeholder="Automation name (e.g. Movie at 10pm)" style="width:100%;box-sizing:border-box;height:40px;padding:0 12px;border-radius:8px;background:#0d151b;border:1px solid #2a3844;color:#e8f0f2;font-size:15px;font-weight:600;margin-bottom:16px;">'
         +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;"><span style="'+lbl+'">WHEN</span>'+sel('abSet(&quot;TriggerType&quot;,this.value)',trigOpts,au.TriggerType)+trigVal+'</div>'
         +(function(){var a0=(au.Actions&&au.Actions[0])?au.Actions[0]:{Type:'scene',Value:''};
           var doVal=(a0.Type==='lift')?('lift:'+a0.Value):'scene';
@@ -2223,6 +2259,15 @@ function knobDrag(ev){
   el.addEventListener('pointermove',mv);el.addEventListener('pointerup',up);
 }
 function avVol(d){S.av.ampVol=Math.min(100,Math.max(0,S.av.ampVol+d));render();}
+// per-zone rotary knob drag (redesign amp cards): drag up/down to set that Sonos zone's volume
+function knobDragZ(ev,i){
+  ev.preventDefault();
+  var st=_az(i), startY=ev.clientY, startV=st.vol, el=ev.currentTarget, moved=false;
+  try{el.setPointerCapture(ev.pointerId);}catch(_){}
+  function mv(e){var d=Math.round((startY-e.clientY)/2);if(Math.abs(d)>0)moved=true;st.vol=Math.min(100,Math.max(0,startV+d));st.mute=false;st.volT=Date.now();render();}
+  function up(e){el.removeEventListener('pointermove',mv);el.removeEventListener('pointerup',up);if(moved){avCtrl(SONOS_ZONES[i][1],'volume',String(st.vol));if(e&&e.stopPropagation)e.stopPropagation();}}
+  el.addEventListener('pointermove',mv);el.addEventListener('pointerup',up);
+}
 // ================= SCENES & AUTOMATIONS =================
 // A scene is a named set of desired states applied by reusing the existing control functions (so lights use
 // their live state, amps/shades/TV/lift use their real commands). Automations (the C# engine) fire a scene

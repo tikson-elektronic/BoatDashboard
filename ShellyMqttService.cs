@@ -35,7 +35,10 @@ public sealed class ShellyMqttService : IDisposable
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _autoStop = new();  // key -> long travel-time backstop
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _holdWatch = new(); // key -> short dead-man watchdog (hold mode)
     private readonly ConcurrentDictionary<string, string> _driving = new();                    // key -> "up"/"down"/"" (avoid MQTT spam on heartbeats)
-    private const int HoldWatchdogMs = 700;   // hold mode: if no heartbeat within this, stop (covers lost release / dead tablet)
+    private const int HoldWatchdogMs = 1500;  // hold mode: if no heartbeat within this, stop (covers lost release / dead tablet).
+                                              // Normal release stops instantly via the explicit 'stop' the UI sends; this is only the
+                                              // backstop for a LOST release, so a wider window absorbs WiFi/tablet heartbeat jitter that
+                                              // was otherwise cutting the motor mid-hold (the "lift only runs 2s" bug). Firmware auto_off (10s) caps it.
 
     // Offline-alarm tracking: a shade Shelly that drops off the broker for too long raises an alarm.
     private readonly ConcurrentDictionary<string, DateTime> _lastOnline = new();  // topic -> last time seen online (UTC)
@@ -116,6 +119,7 @@ public sealed class ShellyMqttService : IDisposable
         LoadPositions();   // restore last-known shade positions from the previous session
         _ = RunAsync();
         _ = MonitorLoopAsync();   // watch for shade controllers dropping off the broker
+        _ = WarmLoopAsync();      // keep each device's HTTP connection warm so the FIRST tap isn't slow
     }
 
     public void SetConfig(IEnumerable<ShellyMotor> motors)
@@ -299,6 +303,24 @@ public sealed class ShellyMqttService : IDisposable
         }
     }
 
+    // These Shelly HTTP servers drop idle keep-alive connections, so the FIRST command after a pause pays a
+    // slow reconnect (~2.5s) while later ones are ~0.2s. A light periodic GET per device keeps the pooled
+    // connection warm so every tap is instant. One request per device every few seconds — very gentle.
+    private async Task WarmLoopAsync()
+    {
+        try { await Task.Delay(4000, _cts.Token); } catch { return; }
+        while (!_cts.IsCancellationRequested)
+        {
+            List<ShellyMotor> ms; lock (_lock) ms = _motors.ToList();
+            foreach (var ip in ms.Where(x => !string.IsNullOrWhiteSpace(x.Ip)).Select(x => x.Ip).Distinct())
+            {
+                var u = ip;
+                _ = Task.Run(async () => { try { await _http.GetAsync($"http://{u}/rpc/Sys.GetStatus", _cts.Token); } catch { } });
+            }
+            try { await Task.Delay(5000, _cts.Token); } catch { break; }
+        }
+    }
+
     private void EvaluateAlarms()
     {
         List<ShellyMotor> ms; lock (_lock) ms = _motors.ToList();
@@ -355,6 +377,16 @@ public sealed class ShellyMqttService : IDisposable
 
     private async Task SetOutput(ShellyMotor m, int id, bool on)
     {
+        // The embedded MQTT broker can take 2-4s to deliver a command to a device (esp. the first after idle),
+        // which made the lift/shades feel "super slow". ONE fire-and-forget direct HTTP RPC lands in ~0.1s so
+        // the relay responds instantly. Single request (no retry burst) keeps it gentle on the small Shellys;
+        // the MQTT publish below stays for reliability + keeps status/position tracking flowing.
+        if (!string.IsNullOrWhiteSpace(m.Ip))
+        {
+            string ip = m.Ip;
+            var rpc = JsonSerializer.Serialize(new { id = 1, method = "Switch.Set", @params = new { id, on } });
+            _ = Task.Run(async () => { try { await _http.PostAsync($"http://{ip}/rpc", new StringContent(rpc, Encoding.UTF8, "application/json")); } catch { } });
+        }
         if (_server is null) return;
         var msg = new MqttApplicationMessageBuilder()
             .WithTopic($"{m.Topic}/command/switch:{id}")
@@ -497,10 +529,11 @@ public sealed class ShellyMqttService : IDisposable
         double distance = Math.Abs(target - cur);
         if (distance < 0.02 && !toLimit) { _driving[key] = ""; await AllOff(); return; }   // already there
 
-        bool up = target < cur;   // lower % = more open = up
-        double runFor = up
-            ? delay + (toLimit ? cur * moveTime + 0.6 : distance * moveTime)          // to open (+overrun if full open)
-            : delay + (toLimit ? (1.0 - cur) * moveTime + 0.6 : distance * moveTime); // to closed
+        // OPEN (target≈0) and CLOSE (target≈1) drive the ABSOLUTE direction and run the FULL travel time, so
+        // they always reach the limit and re-zero the position — even when the tracked estimate has drifted
+        // (that drift is what made OPEN sometimes fire the close relay). Only HALF uses position-relative logic.
+        bool up = toLimit ? (target <= 0.02) : (target < cur);
+        double runFor = toLimit ? (travel + 0.6) : (delay + distance * moveTime);
         runFor = Math.Clamp(runFor, 0.05, travel + 1);
 
         foreach (var m in ms)

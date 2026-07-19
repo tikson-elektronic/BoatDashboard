@@ -18,3 +18,5 @@ Thumbs.db
 # YOLO model (drop-in, not versioned)
 *.onnx
 *.pt
+
+WebUI/*.bak
