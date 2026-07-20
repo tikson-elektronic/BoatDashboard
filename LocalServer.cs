@@ -175,7 +175,8 @@ public sealed class LocalServer : IDisposable
         {
             TcpClient client;
             try { client = await _listener.AcceptTcpClientAsync(_cts.Token); }
-            catch { break; }
+            catch (OperationCanceledException) { break; }                       // app shutting down
+            catch { await Task.Delay(50, CancellationToken.None); continue; }   // transient accept error — never kill the server
             _ = HandleAsync(client);
         }
     }
@@ -190,13 +191,19 @@ public sealed class LocalServer : IDisposable
                 var remoteIp = (client.Client.RemoteEndPoint as IPEndPoint)?.Address ?? IPAddress.Loopback;
                 using var stream = client.GetStream();
 
-                // Read headers (up to the blank line).
+                // Read headers (up to the blank line). Bounded by an idle timeout so a client that
+                // connects but never finishes its request can't leak the socket — that slow handle
+                // leak is what used to exhaust resources and wedge the accept loop. On timeout the
+                // ReadAsync throws OperationCanceledException; the outer catch then disposes the
+                // socket cleanly via the `using`s above.
+                using var readCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+                readCts.CancelAfter(TimeSpan.FromSeconds(15));
                 var head = new StringBuilder();
                 var buf = new byte[1];
                 int consecutive = 0;
                 while (head.Length < 16384)
                 {
-                    int n = await stream.ReadAsync(buf, _cts.Token);
+                    int n = await stream.ReadAsync(buf, readCts.Token);
                     if (n == 0) break;
                     char c = (char)buf[0];
                     head.Append(c);
